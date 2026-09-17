@@ -1,0 +1,20 @@
+ideas para HUs para el proyecto "Centro Deportivo Inteligente - Datos, Procesos, Decisiones"
+
+* objetivo: desarrollar un sistema de información que gestione e integre de forma consistente las inscripciones, actividades, instalaciones y pagos, y facilite la toma de decisiones
+
+- como usuario quiero registrarme en la plataforma
+- como usuario queiro realizar los pagos correspondientes 
+- como usuario quiero tener acceso a todas las actividades disponibles para mi
+- como usuario quiero inscribirme en una actividad
+
+- como administrador quiero añadir una actividad en un horario y un lugar
+- como administrador quiero analizar la rentabilidad de una actividad viendo los ingresos que genera contra los gastos que supone
+- como administrador quiero acceder a informes de ocupación de espacios y demanda
+- como administrador quiero planificar los calendarios
+
+dudas: 
+el pago es una mensualidad o es un pago único?
+todas las actividades son para todos?
+informes de ocupación y demanda de las actividades o de los espacios?
+
+
