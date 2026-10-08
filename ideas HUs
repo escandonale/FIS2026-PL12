@@ -13,14 +13,16 @@ ideas para HUs para el proyecto "Centro Deportivo Inteligente - Datos, Procesos,
 - como administrador quiero planificar los calendarios
 
 dudas: 
-el pago es una mensualidad o es un pago único?
-todas las actividades son para todos? o hay actividades exclusivas para socios
-informes de ocupación y demanda de las actividades o de los espacios?
-se hace una inscripción para una actividad o para una sesión concreta?
-quien gestiona las inscripciones? un administrador general? el monitor de cada actividad?
-una actividad tiene siempre un monitor o puede tener varios? cada monitor está restringido a una actividad?
+el pago es una mensualidad o es un pago único? spr2
+todas las actividades son para todos? o hay actividades exclusivas para socios  - todos
+cuáles son las diferencias entre socio y no socio? - socio tiene prioridad
+informes de ocupación y demanda de las actividades o de los espacios? - spr2
+se hace una inscripción para una actividad o para una sesión concreta? - actividad
+quien gestiona las inscripciones? un administrador general? el monitor de cada actividad? - lo ahce el usuario
+una actividad tiene siempre un monitor o puede tener varios? cada monitor está restringido a una actividad? - no se hace no es relevante
 es necesario llevar un registro de acceso a las instalaciones? y a cada actividad?
-las instalaciones son siempre las mismas? hay que valorar que se puedan comprar o vender nuevos espacios?
+las instalaciones son siempre las mismas? hay que valorar que se puedan comprar o vender nuevos espacios? - son siempre son las mismas
 las actividades tienen una duración temporal (duración en meses de la actividad)?
+
 
 
