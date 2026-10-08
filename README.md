@@ -1,7 +1,7 @@
 # Proyecto Fundamentos 2026
 Proyecto para la asignatura "Fundamentos de la Ingeniería de Software" de Mateo Alonso, Alejandro Escandón y Nicolás de la Vega
 
-Acceso al KanBan: [...]
+Acceso al KanBan: https://in2test.lsi.uniovi.es/redkanban/
 
 Acceso al modelo de datos: https://dbdiagram.io/d/modelo-SisRec-68e3f5f2d2b621e422831408
 
