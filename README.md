@@ -29,3 +29,10 @@ FIS2026-PL12\
 ├── test/              Tests unitarios (unittest / pytest)\
 ├── ideas HUs          Ideas para las historias de usuario\
 └── README.md          README para el proyecto de la asignatura\
+
+
+EJECUCIÓN DE LA APLICACIÓN
+
+Desde la carpeta raíz del proyecto, ejecutar `python main.py`.
+La aplicación inicializa el esquema SQLite si hace falta y muestra el menú
+de consola con las funcionalidades disponibles.
