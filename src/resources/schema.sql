@@ -76,9 +76,14 @@ CREATE TABLE IF NOT EXISTS activity (
     level TEXT NOT NULL
         CHECK (level IN ('Iniciación', 'Medio', 'Avanzado')),
     installation_id INTEGER NOT NULL,
+    start_date TEXT,
     start_time TEXT NOT NULL,
     end_time TEXT NOT NULL,
     available_places INTEGER NOT NULL CHECK (available_places > 0),
+    member_registration_start TEXT,
+    member_registration_end TEXT,
+    non_member_registration_start TEXT,
+    non_member_registration_end TEXT,
     CHECK (end_time > start_time),
     FOREIGN KEY (category, installation_id)
         REFERENCES category_installation (category, installation_id)
@@ -98,4 +103,26 @@ CREATE TABLE IF NOT EXISTS activity_day (
         )),
     PRIMARY KEY (activity_id, weekday),
     FOREIGN KEY (activity_id) REFERENCES activity (id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS socios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,
+    apellidos TEXT NOT NULL,
+    dni TEXT NOT NULL UNIQUE,
+    direccion TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS inscripcion (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    activity_id INTEGER NOT NULL,
+    nombre TEXT NOT NULL,
+    apellidos TEXT NOT NULL,
+    dni TEXT NOT NULL,
+    estado TEXT NOT NULL
+        CHECK (estado IN ('confirmado', 'lista de espera')),
+    fecha_inscripcion TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    es_socio INTEGER NOT NULL DEFAULT 0
+        CHECK (es_socio IN (0, 1)),
+    FOREIGN KEY (activity_id) REFERENCES activity (id)
 );

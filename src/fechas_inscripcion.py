@@ -1,103 +1,151 @@
-import datetime as dt
-import  sqlite3
-from datetime import datetime, date
+from datetime import date
+
+from src.util.database import DataBase
 
 
+def migrate_registration_dates(database: DataBase) -> None:
+    columns = database.executeQuery("PRAGMA table_info(activity)")
+    existing_columns = {column["name"] for column in columns}
+    registration_columns = {
+        "start_date": "TEXT",
+        "member_registration_start": "TEXT",
+        "member_registration_end": "TEXT",
+        "non_member_registration_start": "TEXT",
+        "non_member_registration_end": "TEXT",
+    }
 
-DB_PATH = "centro_deportivo.db"
+    for column, column_type in registration_columns.items():
+        if column not in existing_columns:
+            database.executeUpdateQuery(
+                f"ALTER TABLE activity ADD COLUMN {column} {column_type}"
+            )
 
-def conectar():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row 
-    return conn
-    
 
-def validar_fecha(start_date, ini_s, fin_s, ini_nos, fin_nos):
-    hoy = dt.datetime.now()
-
-    if ini_s < hoy or ini_nos < hoy:
-        raise ValueError("La fecha de apertura no puede ser anterior a la fecha actual.")
-    
-    if fin_s <= ini_s:
-        raise ValueError("La fecha de cierre de socios debe ser posterior a su apertura.")
-    
-    if fin_nos <= ini_nos:
-        raise ValueError("La fecha de cierre de no socios debe ser posterior a su apertura.")
-
-    if ini_s >= ini_nos:
-        raise ValueError("El periodo de socios debe comenzar antes que el de no socios.")
-
-    if ini_nos < fin_s:
-        raise ValueError("Los periodos no pueden solaparse; el de no socios debe empezar tras finalizar el de socios.")
-
-    if fin_s > start_date or fin_nos > start_date:
-        raise ValueError("Los plazos de inscripción deben finalizar antes de que comience la actividad.")
-
-    return True
-
-def plazo_inscripcion():
-    conn = conectar()
-    cursor = conn.cursor()
-
-    hoy = date.today().strftime("%Y-%m-%d")
-    
-    # lista de actividades 
-    query1 = """
-        SELECT id, category, level, start_time
+def get_actividades_no_iniciadas(
+    database: DataBase, today: date | None = None
+) -> list[dict[str, object]]:
+    current_date = (today or date.today()).isoformat()
+    return database.executeQuery(
+        """
+        SELECT activity.id, activity.category, activity.level,
+               activity.start_date, installation.name AS installation
         FROM activity
-        WHERE datetime(start_time) > datetime(?)
-    """
-    
-    cursor.execute(query1, (hoy,))
-    actividades = cursor.fetchall()
-
-    if not actividades:
-        print("No hay actividades disponibles.")
-        conn.close()
-        return
-
-    # Actividades disponibles
-    for act in actividades:
-        print(f"ID: {act['id']} | Categoría: {act['category']} | Nivel: {act['level']} | Inicio: {act['start_time']}")
-
-    try: 
-        id_elegido = int(input("Introduce el ID de la actividad que deseas configurar: ").strip())
-    
-        actividad_seleccionada = next((a for a in actividades if a['id'] == id_elegido), None)
-        if not actividad_seleccionada:
-            raise ValueError("El ID introducido no es valido")
-    
-    
-
-        start_date_str = actividad_seleccionada['start_time']
-        start_date_dt = dt.datetime.strptime(start_date_str, "%Y-%m-%d %H:%M")
-        
-        apertura_socios = dt.datetime.strptime(input("Inicio plazo socios: ").strip(), "%Y-%m-%d")
-        cierre_socios = dt.datetime.strptime(input("Cierre plazo socios: ").strip(), "%Y-%m-%d")
-        apertura_no_socios = dt.datetime.strptime(input("Inicio plazo no socios: ").strip(), "%Y-%m-%d")
-        cierre_no_socios = dt.datetime.strptime(input("Cierre plazo no socios: ").strip(), "%Y-%m-%d")
-
-        
-        if validar_fecha(start_date_dt, apertura_socios, cierre_socios, apertura_no_socios, cierre_no_socios):
+        LEFT JOIN installation ON installation.id = activity.installation_id
+        WHERE activity.start_date > ?
+        ORDER BY activity.start_date, activity.id
+        """,
+        current_date,
+    )
 
 
-            query2 = """
-                UPDATE activity
-                SET ini_socio = ?,
-                    fin_socio = ?,
-                    ini_no_socio = ?,
-                    fin_no_socio = ?
-                    WHERE id = ?
-                """
+def abrir_plazo_inscripcion(
+    database: DataBase,
+    activity_id: int,
+    member_start: str,
+    member_end: str,
+    non_member_start: str,
+    non_member_end: str,
+    today: date | None = None,
+) -> dict[str, object]:
+    if type(activity_id) is not int or activity_id <= 0:
+        raise ValueError("Selecciona un ID de actividad válido.")
 
-            cursor.execute(query2, (
-                    apertura_socios.strftime("%Y-%m-%d %H:%M"),
-                    cierre_socios.strftime("%Y-%m-%d %H:%M"),
-                    apertura_no_socios.strftime("%Y-%m-%d %H:%M"),
-                    cierre_no_socios.strftime("%Y-%m-%d %H:%M"),
-                    id_elegido
-                ))
-                
-            conn.commit()
-    except ValueError as error:
-        print("Error al seleccionar una actividad.")
+    current_date = today or date.today()
+    member_start_date = _parse_iso_date(member_start, "inicio para socios")
+    member_end_date = _parse_iso_date(member_end, "fin para socios")
+    non_member_start_date = _parse_iso_date(
+        non_member_start, "inicio para no socios"
+    )
+    non_member_end_date = _parse_iso_date(non_member_end, "fin para no socios")
+
+    if any(
+        registration_date < current_date
+        for registration_date in (
+            member_start_date,
+            member_end_date,
+            non_member_start_date,
+            non_member_end_date,
+        )
+    ):
+        raise ValueError(
+            "Ninguna fecha de inscripción puede ser anterior a la fecha actual."
+        )
+    if member_end_date <= member_start_date:
+        raise ValueError(
+            "El fin del plazo para socios debe ser posterior a su inicio."
+        )
+    if non_member_start_date <= member_end_date:
+        raise ValueError(
+            "El plazo para no socios debe empezar después de que termine el de socios."
+        )
+    if non_member_end_date <= non_member_start_date:
+        raise ValueError(
+            "El fin del plazo para no socios debe ser posterior a su inicio."
+        )
+
+    activities = database.executeQuery(
+        "SELECT id, start_date FROM activity WHERE id = ?",
+        activity_id,
+    )
+    if not activities:
+        raise ValueError("No existe una actividad con ese ID.")
+    activity_start_value = activities[0]["start_date"]
+    if not isinstance(activity_start_value, str):
+        raise ValueError("La actividad no tiene una fecha de inicio asignada.")
+    activity_start = _parse_iso_date(
+        activity_start_value, "inicio de la actividad"
+    )
+    if activity_start <= current_date:
+        raise ValueError("La actividad ya ha comenzado o comienza hoy.")
+
+    if any(
+        registration_date >= activity_start
+        for registration_date in (
+            member_start_date,
+            member_end_date,
+            non_member_start_date,
+            non_member_end_date,
+        )
+    ):
+        raise ValueError(
+            "Todos los plazos de inscripción deben terminar antes del inicio "
+            "de la actividad."
+        )
+
+    database.executeUpdateQuery(
+        """
+        UPDATE activity
+        SET member_registration_start = ?,
+            member_registration_end = ?,
+            non_member_registration_start = ?,
+            non_member_registration_end = ?
+        WHERE id = ?
+        """,
+        member_start_date.isoformat(),
+        member_end_date.isoformat(),
+        non_member_start_date.isoformat(),
+        non_member_end_date.isoformat(),
+        activity_id,
+    )
+    return {
+        "activity_id": activity_id,
+        "start_date": activity_start.isoformat(),
+        "member_registration_start": member_start_date.isoformat(),
+        "member_registration_end": member_end_date.isoformat(),
+        "non_member_registration_start": non_member_start_date.isoformat(),
+        "non_member_registration_end": non_member_end_date.isoformat(),
+    }
+
+
+def _parse_iso_date(value: str, field: str) -> date:
+    if not isinstance(value, str):
+        raise ValueError(f"La fecha de {field} debe tener el formato AAAA-MM-DD.")
+    try:
+        parsed_date = date.fromisoformat(value)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"La fecha de {field} debe tener el formato AAAA-MM-DD."
+        ) from None
+    if parsed_date.isoformat() != value:
+        raise ValueError(f"La fecha de {field} debe tener el formato AAAA-MM-DD.")
+    return parsed_date
