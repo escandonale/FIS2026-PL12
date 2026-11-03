@@ -64,8 +64,52 @@ def inscribir_socio(dni, id_actividad):
             "periodicidad": actividad['periodicidad'],
             "estado": estado_inscripcion
         }
-        
+       
     except sqlite3.IntegrityError:
         raise ValueError("El socio ya está inscrito en esta actividad.")
+
+
+def get_inscripciones_cancelables(dni):
+    conn = conectar()
+    cursor = conn.cursor()
+    
+    # Obtiene solo las actividades a las que está inscrito y en plazo de cancelación
+    query = """
+        SELECT a.id, a.nombre, i.estado, a.fecha_limite_cancelacion
+        FROM Actividades a
+        JOIN Inscripciones i ON a.id = i.id_actividad
+        JOIN Socios s ON i.id_socio = s.id
+        WHERE s.dni = ? AND i.estado IN ('confirmada', 'lista_espera')
+        AND a.fecha_limite_cancelacion >= CURRENT_DATE
+    """
+    cursor.execute(query, (dni,))
+    actividades = cursor.fetchall()
+    conn.close()
+    return actividades
+
+def cancelar_inscripcion(dni, id_actividad):
+    conn = conectar()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("SELECT id FROM Socios WHERE dni = ?", (dni,))
+        socio = cursor.fetchone()
+        if not socio:
+            raise ValueError("Socio no encontrado.")
+            
+        id_socio = socio['id']
+        
+        # Cancela la inscripción liberando la plaza y anula el pago asociado[cite: 24]
+        cursor.execute("""
+            UPDATE Inscripciones 
+            SET estado = 'cancelada', estado_pago = 'anulado'
+            WHERE id_socio = ? AND id_actividad = ? AND estado != 'cancelada'
+        """, (id_socio, id_actividad))
+        
+        if cursor.rowcount == 0:
+            raise ValueError("No se pudo cancelar. Verifica que estés inscrito y en plazo.")
+            
+        conn.commit()
+        return True
     finally:
         conn.close()
