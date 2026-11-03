@@ -3,6 +3,7 @@ from enum import Enum
 from typing import Iterable
 
 from src.util.database import DataBase
+from src.util.unexpectedException import UnexpectedException
 
 
 class ActivityCategory(str, Enum):
@@ -44,7 +45,6 @@ def add_activity(
     start_time: str,
     end_time: str,
     available_places: int,
-    installation_id: int,
 ) -> dict[str, object]:
     category = _parse_enum(ActivityCategory, category, "categoría")
     level = _parse_enum(ActivityLevel, level, "nivel")
@@ -52,51 +52,24 @@ def add_activity(
     validate_times(start_time, end_time)
     if type(available_places) is not int or available_places <= 0:
         raise ValueError("El número de plazas debe ser un entero mayor que cero.")
-    if type(installation_id) is not int:
-        raise ValueError("Selecciona una instalación válida.")
-
-    installation = database.executeQuery(
-        """
-        SELECT installation.id, installation.name
-        FROM installation
-        JOIN category_installation
-            ON installation.id = category_installation.installation_id
-        WHERE installation.id = ? AND category_installation.category = ?
-        """,
-        installation_id,
-        category.value,
-    )
-    if not installation:
-        raise ValueError(
-            f"La instalación seleccionada no está adaptada para {category.value}."
-        )
-
     activity_id = database.executeTransaction(
         """
         INSERT INTO activity (
-            category, level, installation_id, start_time, end_time, available_places
+            category, level, start_time, end_time, available_places
         )
-        SELECT ?, ?, ?, ?, ?, ?
+        SELECT ?, ?, ?, ?, ?
         WHERE EXISTS (
             SELECT 1
             FROM offer
             WHERE id = 1 AND registrations_open = 0
         )
-        AND EXISTS (
-            SELECT 1
-            FROM category_installation
-            WHERE category = ? AND installation_id = ?
-        )
         """,
         (
             category.value,
             level.value,
-            installation_id,
             start_time,
             end_time,
             available_places,
-            category.value,
-            installation_id,
         ),
         "INSERT INTO activity_day (activity_id, weekday) VALUES (?, ?)",
         [(weekday.value,) for weekday in parsed_weekdays],
@@ -117,11 +90,13 @@ def add_activity(
         "id": activity_id,
         "category": category.value,
         "level": level.value,
-        "installation": installation[0]["name"],
+        "installation": None,
         "weekdays": [weekday.value for weekday in parsed_weekdays],
         "start_time": start_time,
         "end_time": end_time,
         "available_places": available_places,
+        "occupied_places": 0,
+        "occupancy_percentage": 0.0,
     }
 
 
@@ -130,7 +105,9 @@ def get_activity(database: DataBase, activity_id: int) -> dict[str, object] | No
         """
         SELECT activity.id, activity.category, activity.level,
                installation.name AS installation,
-               activity.start_time, activity.end_time, activity.available_places
+               activity.start_time, activity.end_time, activity.available_places,
+               activity.occupied_places, activity.ini_socio,
+               activity.fin_socio, activity.ini_no_socio, activity.fin_no_socio
         FROM activity
         LEFT JOIN installation ON activity.installation_id = installation.id
         WHERE activity.id = ?
@@ -146,7 +123,7 @@ def get_activity(database: DataBase, activity_id: int) -> dict[str, object] | No
     )
     weekday_values = {row["weekday"] for row in day_rows}
     activity = activities[0]
-    return {
+    activity_data = {
         "id": activity["id"],
         "category": activity["category"],
         "level": activity["level"],
@@ -159,7 +136,153 @@ def get_activity(database: DataBase, activity_id: int) -> dict[str, object] | No
         "start_time": activity["start_time"],
         "end_time": activity["end_time"],
         "available_places": activity["available_places"],
+        "occupied_places": activity["occupied_places"],
+        "occupancy_percentage": round(
+            activity["occupied_places"] / activity["available_places"] * 100,
+            1,
+        ),
     }
+    date_fields = {
+        "ini_socio": activity.get("ini_socio"),
+        "fin_socio": activity.get("fin_socio"),
+        "ini_no_socio": activity.get("ini_no_socio"),
+        "fin_no_socio": activity.get("fin_no_socio"),
+    }
+    if any(value is not None for value in date_fields.values()):
+        activity_data.update(date_fields)
+    return activity_data
+
+
+def assign_activity_to_installation(
+    database: DataBase, activity_id: int, installation_id: int
+) -> dict[str, object]:
+    activity = database.executeQuery(
+        "SELECT id, category FROM activity WHERE id = ?",
+        activity_id,
+    )
+    if not activity:
+        raise ValueError("No existe una actividad con ese identificador.")
+
+    installation = database.executeQuery(
+        """
+        SELECT installation.id, installation.name
+        FROM installation
+        JOIN category_installation
+            ON installation.id = category_installation.installation_id
+        WHERE installation.id = ? AND category_installation.category = ?
+        """,
+        installation_id,
+        activity[0]["category"],
+    )
+    if not installation:
+        raise ValueError(
+            "La instalación seleccionada no está adaptada para "
+            f"{activity[0]['category']}."
+        )
+
+    conflicts = database.executeQuery(
+        """
+        SELECT other.id, other.start_time, other.end_time, other_day.weekday
+        FROM activity AS current
+        JOIN activity_day AS current_day
+            ON current_day.activity_id = current.id
+        JOIN activity AS other
+            ON other.installation_id = ?
+            AND other.id != current.id
+        JOIN activity_day AS other_day
+            ON other_day.activity_id = other.id
+            AND other_day.weekday = current_day.weekday
+        WHERE current.id = ?
+          AND other.start_time < current.end_time
+          AND other.end_time > current.start_time
+        ORDER BY other_day.weekday, other.start_time
+        """,
+        installation_id,
+        activity_id,
+    )
+    if conflicts:
+        conflict = conflicts[0]
+        raise ValueError(
+            f"La instalación {installation[0]['name']} ya está ocupada el "
+            f"{conflict['weekday']} por la actividad {conflict['id']} "
+            f"({conflict['start_time']}-{conflict['end_time']})."
+        )
+
+    try:
+        database.executeUpdateQuery(
+            """
+            UPDATE activity
+            SET installation_id = ?
+            WHERE id = ?
+            """,
+            installation_id,
+            activity_id,
+        )
+    except UnexpectedException as error:
+        if "schedule_conflict" in str(error):
+            raise ValueError(
+                f"La instalación {installation[0]['name']} tiene un solapamiento "
+                "con otra actividad."
+            ) from error
+        raise
+    return {
+        "id": activity_id,
+        "category": activity[0]["category"],
+        "installation": installation[0]["name"],
+    }
+
+
+def set_activity_occupancy(
+    database: DataBase, activity_id: int, occupied_places: int
+) -> None:
+    if type(occupied_places) is not int or occupied_places < 0:
+        raise ValueError("La ocupación debe ser un entero no negativo.")
+
+    activity = database.executeQuery(
+        "SELECT available_places FROM activity WHERE id = ?",
+        activity_id,
+    )
+    if not activity:
+        raise ValueError("No existe una actividad con ese identificador.")
+    if occupied_places > activity[0]["available_places"]:
+        raise ValueError("La ocupación no puede superar la capacidad de la actividad.")
+
+    database.executeUpdateQuery(
+        "UPDATE activity SET occupied_places = ? WHERE id = ?",
+        occupied_places,
+        activity_id,
+    )
+
+
+def list_installation_conflicts(database: DataBase) -> list[dict[str, object]]:
+    return database.executeQuery(
+        """
+        SELECT
+            first_activity.id AS first_activity_id,
+            second_activity.id AS second_activity_id,
+            installation.name AS installation,
+            first_day.weekday,
+            first_activity.start_time AS first_start_time,
+            first_activity.end_time AS first_end_time,
+            second_activity.start_time AS second_start_time,
+            second_activity.end_time AS second_end_time
+        FROM activity AS first_activity
+        JOIN activity_day AS first_day
+            ON first_day.activity_id = first_activity.id
+        JOIN activity AS second_activity
+            ON second_activity.installation_id = first_activity.installation_id
+            AND second_activity.id > first_activity.id
+        JOIN activity_day AS second_day
+            ON second_day.activity_id = second_activity.id
+            AND second_day.weekday = first_day.weekday
+        JOIN installation
+            ON installation.id = first_activity.installation_id
+        WHERE first_activity.start_time < second_activity.end_time
+          AND first_activity.end_time > second_activity.start_time
+        ORDER BY installation.name, first_day.weekday,
+                 first_activity.start_time
+        """
+    )
 
 
 def list_activities(database: DataBase) -> list[dict[str, object]]:
@@ -173,6 +296,11 @@ def list_activities(database: DataBase) -> list[dict[str, object]]:
             activity.start_time,
             activity.end_time,
             activity.available_places,
+            activity.occupied_places,
+            activity.ini_socio,
+            activity.fin_socio,
+            activity.ini_no_socio,
+            activity.fin_no_socio,
             activity_day.weekday
         FROM activity
         LEFT JOIN installation ON activity.installation_id = installation.id
@@ -194,7 +322,7 @@ def list_activities(database: DataBase) -> list[dict[str, object]]:
     activities = []
     for row in rows:
         if not activities or activities[-1]["id"] != row["id"]:
-            activities.append({
+            activity_data = {
                 "id": row["id"],
                 "category": row["category"],
                 "level": row["level"],
@@ -203,7 +331,21 @@ def list_activities(database: DataBase) -> list[dict[str, object]]:
                 "start_time": row["start_time"],
                 "end_time": row["end_time"],
                 "available_places": row["available_places"],
-            })
+                "occupied_places": row["occupied_places"],
+                "occupancy_percentage": round(
+                    row["occupied_places"] / row["available_places"] * 100,
+                    1,
+                ),
+            }
+            date_fields = {
+                "ini_socio": row.get("ini_socio"),
+                "fin_socio": row.get("fin_socio"),
+                "ini_no_socio": row.get("ini_no_socio"),
+                "fin_no_socio": row.get("fin_no_socio"),
+            }
+            if any(value is not None for value in date_fields.values()):
+                activity_data.update(date_fields)
+            activities.append(activity_data)
         if row["weekday"] is not None:
             activities[-1]["weekdays"].append(row["weekday"])
 
@@ -229,11 +371,84 @@ def get_installations(
 
 def migrate_activity_installation(database: DataBase) -> None:
     columns = database.executeQuery("PRAGMA table_info(activity)")
-    if not any(column["name"] == "installation_id" for column in columns):
-        database.executeUpdateQuery(
-            "ALTER TABLE activity ADD COLUMN installation_id "
-            "INTEGER REFERENCES installation (id)"
+    installation_column = next(
+        (column for column in columns if column["name"] == "installation_id"),
+        None,
+    )
+    occupied_places_column = next(
+        (column for column in columns if column["name"] == "occupied_places"),
+        None,
+    )
+    occupied_places_value = (
+        "occupied_places" if occupied_places_column is not None else "0"
+    )
+    if installation_column is None or installation_column["notnull"]:
+        installation_value = (
+            "installation_id" if installation_column is not None else "NULL"
         )
+        database.executeScriptFromString(
+            f"""
+            PRAGMA foreign_keys = OFF;
+            BEGIN;
+            CREATE TABLE activity_new (
+                id INTEGER PRIMARY KEY,
+                category TEXT NOT NULL
+                    CHECK (category IN (
+                        'Natación', 'Pilates', 'Acondicionamiento Físico',
+                        'Padel', 'Tenis'
+                    )),
+                level TEXT NOT NULL
+                    CHECK (level IN ('Iniciación', 'Medio', 'Avanzado')),
+                installation_id INTEGER,
+                start_time TEXT NOT NULL,
+                end_time TEXT NOT NULL,
+                available_places INTEGER NOT NULL CHECK (available_places > 0),
+                occupied_places INTEGER NOT NULL DEFAULT 0
+                    CHECK (
+                        occupied_places >= 0
+                        AND occupied_places <= available_places
+                    ),
+                CHECK (end_time > start_time),
+                FOREIGN KEY (category, installation_id)
+                    REFERENCES category_installation (category, installation_id)
+            );
+            INSERT INTO activity_new (
+                id, category, level, installation_id,
+                start_time, end_time, available_places, occupied_places
+            )
+            SELECT
+                id, category, level, {installation_value},
+                start_time, end_time, available_places, {occupied_places_value}
+            FROM activity;
+            DROP TABLE activity;
+            ALTER TABLE activity_new RENAME TO activity;
+            COMMIT;
+            PRAGMA foreign_keys = ON;
+            """
+        )
+
+    columns = database.executeQuery("PRAGMA table_info(activity)")
+    if not any(column["name"] == "occupied_places" for column in columns):
+        database.executeUpdateQuery(
+            """
+            ALTER TABLE activity
+            ADD COLUMN occupied_places INTEGER NOT NULL DEFAULT 0
+                CHECK (occupied_places >= 0 AND occupied_places <= available_places)
+            """
+        )
+        columns = database.executeQuery("PRAGMA table_info(activity)")
+
+    for column_name in (
+        "ini_socio",
+        "fin_socio",
+        "ini_no_socio",
+        "fin_no_socio",
+    ):
+        if not any(column["name"] == column_name for column in columns):
+            database.executeUpdateQuery(
+                f"ALTER TABLE activity ADD COLUMN {column_name} TEXT"
+            )
+            columns = database.executeQuery("PRAGMA table_info(activity)")
 
 
 def _parse_enum(enum_type: type[Enum], value: Enum | str, field: str):
