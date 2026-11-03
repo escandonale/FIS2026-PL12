@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,8 +18,14 @@ from src.activities import (
     migrate_activity_installation,
     set_activity_occupancy,
 )
-from main import _choose_weekdays, main, run_menu
+from main import (
+    _choose_weekdays,
+    display_existing_conflicts,
+    main,
+    run_menu,
+)
 from src.control_plazas import control_plazas, get_activity_seat_report
+from src.fechas_inscripcion import abrir_plazo_inscripcion
 from src.util.database import DataBase
 from src.config import CONSTRAINTS
 from src.actividades.actividades_modelo import (
@@ -35,11 +42,31 @@ class ActivityFunctionsTests(unittest.TestCase):
         self.database = DataBase(database_path)
         schema_path = Path(__file__).parent.parent / "src" / "resources" / "schema.sql"
         self.database.executeScript(schema_path)
+        self.pilates_installation_id = get_installations(
+            self.database, "Pilates"
+        )[0]["id"]
         migrate_activity_installation(self.database)
         self.database.executeScript(CONSTRAINTS)
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def _open_member_registration_period(self, activity_id):
+        today = date.today()
+        self.database.executeUpdateQuery(
+            "UPDATE activity SET start_date = ? WHERE id = ?",
+            (today + timedelta(days=30)).isoformat(),
+            activity_id,
+        )
+        abrir_plazo_inscripcion(
+            self.database,
+            activity_id,
+            today.isoformat(),
+            (today + timedelta(days=5)).isoformat(),
+            (today + timedelta(days=6)).isoformat(),
+            (today + timedelta(days=10)).isoformat(),
+            today=today,
+        )
 
     def test_add_activity_stores_and_returns_all_details(self):
         activity = add_activity(
@@ -115,22 +142,25 @@ class ActivityFunctionsTests(unittest.TestCase):
         activity = add_activity(
             self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 2
         )
+        self._open_member_registration_period(activity["id"])
         self.database.executeUpdateQuery(
             """
-            INSERT INTO Socios (dni, nombre, apellidos, numero_socio)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO Socios (
+                dni, nombre, apellidos, numero_socio, direccion
+            ) VALUES (?, ?, ?, ?, ?)
             """,
             "12345678A",
             "Ana",
             "García",
             "S001",
+            "Calle Mayor 1",
         )
 
         receipt = inscribir_socio(
             "12345678A", activity["id"], self.database.dbname
         )
 
-        self.assertEqual(receipt["estado"], "confirmada")
+        self.assertEqual(receipt["estado"], "confirmado")
         self.assertEqual(
             get_actividades_disponibles(self.database.dbname)[0]["plazas_libres"],
             1,
@@ -139,27 +169,57 @@ class ActivityFunctionsTests(unittest.TestCase):
             get_activity(self.database, activity["id"])["occupied_places"], 1
         )
 
-    def test_full_activity_enrollment_is_added_to_waiting_list(self):
+    def test_member_enrollment_requires_a_configured_registration_period(self):
         activity = add_activity(
-            self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 1
+            self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 2
         )
-        set_activity_occupancy(self.database, activity["id"], 1)
         self.database.executeUpdateQuery(
             """
-            INSERT INTO Socios (dni, nombre, apellidos, numero_socio)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO Socios (
+                dni, nombre, apellidos, numero_socio, direccion
+            ) VALUES (?, ?, ?, ?, ?)
             """,
             "12345678A",
             "Ana",
             "García",
             "S001",
+            "Calle Mayor 1",
+        )
+
+        with self.assertRaisesRegex(ValueError, "No hay un plazo"):
+            inscribir_socio("12345678A", activity["id"], self.database.dbname)
+
+        self.assertEqual(
+            self.database.executeQuery(
+                "SELECT COUNT(*) AS count FROM inscripcion"
+            )[0]["count"],
+            0,
+        )
+
+    def test_full_activity_enrollment_is_added_to_waiting_list(self):
+        activity = add_activity(
+            self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 1
+        )
+        self._open_member_registration_period(activity["id"])
+        set_activity_occupancy(self.database, activity["id"], 1)
+        self.database.executeUpdateQuery(
+            """
+            INSERT INTO Socios (
+                dni, nombre, apellidos, numero_socio, direccion
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            "12345678A",
+            "Ana",
+            "García",
+            "S001",
+            "Calle Mayor 1",
         )
 
         receipt = inscribir_socio(
             "12345678A", activity["id"], self.database.dbname
         )
 
-        self.assertEqual(receipt["estado"], "lista_espera")
+        self.assertEqual(receipt["estado"], "lista de espera")
         self.assertEqual(
             get_activity(self.database, activity["id"])["occupied_places"], 1
         )
@@ -168,15 +228,18 @@ class ActivityFunctionsTests(unittest.TestCase):
         activity = add_activity(
             self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 2
         )
+        self._open_member_registration_period(activity["id"])
         self.database.executeUpdateQuery(
             """
-            INSERT INTO Socios (dni, nombre, apellidos, numero_socio)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO Socios (
+                dni, nombre, apellidos, numero_socio, direccion
+            ) VALUES (?, ?, ?, ?, ?)
             """,
             "12345678A",
             "Ana",
             "García",
             "S001",
+            "Calle Mayor 1",
         )
         inscribir_socio("12345678A", activity["id"], self.database.dbname)
 
@@ -588,6 +651,7 @@ class ActivityFunctionsTests(unittest.TestCase):
             "3",  # Wednesday
             "5",  # Friday
             "0",  # finish selecting days
+            "2026-12-01",
             "10:00",
             "11:00",
             "12",
@@ -653,11 +717,11 @@ class ActivityFunctionsTests(unittest.TestCase):
 
     def test_console_menu_starts_member_enrollment(self):
         with patch("main.iniciar_inscripcion") as enrollment_mock:
-            with patch("builtins.input", side_effect=["4", "0"]):
+            with patch("builtins.input", side_effect=["5", "0"]):
                 with patch("builtins.print"):
                     run_menu(self.database)
 
-        enrollment_mock.assert_called_once_with()
+            enrollment_mock.assert_called_once_with(self.database.dbname)
 
     def test_activity_seat_report_counts_confirmed_and_lists_all_registrations(self):
         activity = add_activity(
@@ -774,7 +838,7 @@ class ActivityFunctionsTests(unittest.TestCase):
         self.assertIn("activity", [table["name"] for table in tables])
         self.assertIn("installation", [table["name"] for table in tables])
         self.assertIn("Socios", [table["name"] for table in tables])
-        self.assertIn("Inscripciones", [table["name"] for table in tables])
+        self.assertIn("inscripcion", [table["name"] for table in tables])
         self.assertIn("CENTRO DEPORTIVO", str(print_mock.call_args_list))
         triggers = DataBase(database_path).executeQuery(
             "SELECT name FROM sqlite_master WHERE type = 'trigger'"

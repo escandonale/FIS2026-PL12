@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-from util.unexpectedException import UnexpectedException
+from src.util.unexpectedException import UnexpectedException
 
 
 class DataBase:

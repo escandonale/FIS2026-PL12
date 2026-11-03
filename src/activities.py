@@ -1,6 +1,6 @@
 from datetime import date, time
 from enum import Enum
-from typing import Iterable
+from typing import Iterable, TypedDict
 
 from src.util.database import DataBase
 from src.util.unexpectedException import UnexpectedException
@@ -33,6 +33,11 @@ class Weekday(str, Enum):
 WEEKDAYS = tuple(Weekday)
 
 
+class Installation(TypedDict):
+    id: int
+    name: str
+
+
 class RegistrationsAlreadyOpenError(RuntimeError):
     """Raised when an activity is added after registrations have opened."""
 
@@ -45,7 +50,7 @@ def add_activity(
     start_time: str,
     end_time: str,
     available_places: int,
-    installation_id: int,
+    installation_id: int | None = None,
     start_date: str | None = None,
 ) -> dict[str, object]:
     category = _parse_enum(ActivityCategory, category, "categoría")
@@ -114,7 +119,11 @@ def get_activity(database: DataBase, activity_id: int) -> dict[str, object] | No
         SELECT activity.id, activity.category, activity.level,
                installation.name AS installation,
                activity.start_date, activity.start_time, activity.end_time,
-               activity.available_places
+                  activity.available_places, activity.occupied_places,
+                  activity.member_registration_start,
+                  activity.member_registration_end,
+                  activity.non_member_registration_start,
+                  activity.non_member_registration_end
         FROM activity
         LEFT JOIN installation ON activity.installation_id = installation.id
         WHERE activity.id = ?
@@ -151,10 +160,13 @@ def get_activity(database: DataBase, activity_id: int) -> dict[str, object] | No
         ),
     }
     date_fields = {
-        "ini_socio": activity.get("ini_socio"),
-        "fin_socio": activity.get("fin_socio"),
-        "ini_no_socio": activity.get("ini_no_socio"),
-        "fin_no_socio": activity.get("fin_no_socio"),
+        column_name: activity[column_name]
+        for column_name in (
+            "member_registration_start",
+            "member_registration_end",
+            "non_member_registration_start",
+            "non_member_registration_end",
+        )
     }
     if any(value is not None for value in date_fields.values()):
         activity_data.update(date_fields)
@@ -306,10 +318,10 @@ def list_activities(database: DataBase) -> list[dict[str, object]]:
             activity.end_time,
             activity.available_places,
             activity.occupied_places,
-            activity.ini_socio,
-            activity.fin_socio,
-            activity.ini_no_socio,
-            activity.fin_no_socio,
+            activity.member_registration_start,
+            activity.member_registration_end,
+            activity.non_member_registration_start,
+            activity.non_member_registration_end,
             activity_day.weekday
         FROM activity
         LEFT JOIN installation ON activity.installation_id = installation.id
@@ -348,10 +360,13 @@ def list_activities(database: DataBase) -> list[dict[str, object]]:
                 ),
             }
             date_fields = {
-                "ini_socio": row.get("ini_socio"),
-                "fin_socio": row.get("fin_socio"),
-                "ini_no_socio": row.get("ini_no_socio"),
-                "fin_no_socio": row.get("fin_no_socio"),
+                column_name: row[column_name]
+                for column_name in (
+                    "member_registration_start",
+                    "member_registration_end",
+                    "non_member_registration_start",
+                    "non_member_registration_end",
+                )
             }
             if any(value is not None for value in date_fields.values()):
                 activity_data.update(date_fields)
@@ -364,7 +379,7 @@ def list_activities(database: DataBase) -> list[dict[str, object]]:
 
 def get_installations(
     database: DataBase, category: ActivityCategory | str
-) -> list[dict[str, object]]:
+) -> list[Installation]:
     category = _parse_enum(ActivityCategory, category, "categoría")
     return database.executeQuery(
         """
@@ -396,6 +411,20 @@ def migrate_activity_installation(database: DataBase) -> None:
         installation_value = (
             "installation_id" if installation_column is not None else "NULL"
         )
+        columns_by_name = {
+            column["name"] for column in columns
+        }
+        preserved_columns = (
+            "start_date",
+            "member_registration_start",
+            "member_registration_end",
+            "non_member_registration_start",
+            "non_member_registration_end",
+        )
+        preserved_values = {
+            name: name if name in columns_by_name else "NULL"
+            for name in preserved_columns
+        }
         database.executeScriptFromString(
             f"""
             PRAGMA foreign_keys = OFF;
@@ -418,17 +447,29 @@ def migrate_activity_installation(database: DataBase) -> None:
                         occupied_places >= 0
                         AND occupied_places <= available_places
                     ),
+                start_date TEXT,
+                member_registration_start TEXT,
+                member_registration_end TEXT,
+                non_member_registration_start TEXT,
+                non_member_registration_end TEXT,
                 CHECK (end_time > start_time),
                 FOREIGN KEY (category, installation_id)
                     REFERENCES category_installation (category, installation_id)
             );
             INSERT INTO activity_new (
                 id, category, level, installation_id,
-                start_time, end_time, available_places, occupied_places
+                start_time, end_time, available_places, occupied_places,
+                start_date, member_registration_start, member_registration_end,
+                non_member_registration_start, non_member_registration_end
             )
             SELECT
                 id, category, level, {installation_value},
-                start_time, end_time, available_places, {occupied_places_value}
+                start_time, end_time, available_places, {occupied_places_value},
+                {preserved_values["start_date"]},
+                {preserved_values["member_registration_start"]},
+                {preserved_values["member_registration_end"]},
+                {preserved_values["non_member_registration_start"]},
+                {preserved_values["non_member_registration_end"]}
             FROM activity;
             DROP TABLE activity;
             ALTER TABLE activity_new RENAME TO activity;
@@ -438,6 +479,22 @@ def migrate_activity_installation(database: DataBase) -> None:
         )
 
     columns = database.executeQuery("PRAGMA table_info(activity)")
+    if not any(column["name"] == "start_date" for column in columns):
+        database.executeUpdateQuery("ALTER TABLE activity ADD COLUMN start_date TEXT")
+        columns = database.executeQuery("PRAGMA table_info(activity)")
+
+    for column_name in (
+        "member_registration_start",
+        "member_registration_end",
+        "non_member_registration_start",
+        "non_member_registration_end",
+    ):
+        if not any(column["name"] == column_name for column in columns):
+            database.executeUpdateQuery(
+                f"ALTER TABLE activity ADD COLUMN {column_name} TEXT"
+            )
+            columns = database.executeQuery("PRAGMA table_info(activity)")
+
     if not any(column["name"] == "occupied_places" for column in columns):
         database.executeUpdateQuery(
             """
@@ -447,19 +504,6 @@ def migrate_activity_installation(database: DataBase) -> None:
             """
         )
         columns = database.executeQuery("PRAGMA table_info(activity)")
-
-    for column_name in (
-        "ini_socio",
-        "fin_socio",
-        "ini_no_socio",
-        "fin_no_socio",
-    ):
-        if not any(column["name"] == column_name for column in columns):
-            database.executeUpdateQuery(
-                f"ALTER TABLE activity ADD COLUMN {column_name} TEXT"
-            )
-            columns = database.executeQuery("PRAGMA table_info(activity)")
-
 
 def _parse_activity_date(value: str) -> date:
     try:

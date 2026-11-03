@@ -178,6 +178,58 @@ class RegistrationDateTests(unittest.TestCase):
             "non_member_registration_end",
         }.issubset(column_names))
 
+    def test_migration_converts_legacy_dates_even_when_new_columns_exist(self):
+        legacy_database = DataBase(Path(self.temp_dir.name) / "legacy_dates.sqlite")
+        legacy_database.executeUpdateQuery(
+            """
+            CREATE TABLE activity (
+                id INTEGER PRIMARY KEY,
+                start_time TEXT NOT NULL,
+                start_date TEXT,
+                member_registration_start TEXT,
+                member_registration_end TEXT,
+                non_member_registration_start TEXT,
+                non_member_registration_end TEXT,
+                ini_socio TEXT,
+                fin_socio TEXT,
+                ini_no_socio TEXT,
+                fin_no_socio TEXT
+            )
+            """
+        )
+        legacy_database.executeUpdateQuery(
+            """
+            INSERT INTO activity (
+                id, start_time, ini_socio, fin_socio, ini_no_socio, fin_no_socio
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            7,
+            "2026-06-01 10:00",
+            "2026-05-01 00:00",
+            "2026-05-10 00:00",
+            "2026-05-11 00:00",
+            "2026-05-20 00:00",
+        )
+
+        migrate_registration_dates(legacy_database)
+
+        activity = legacy_database.executeQuery(
+            """
+            SELECT start_date, start_time, member_registration_start,
+                   member_registration_end, non_member_registration_start,
+                   non_member_registration_end
+            FROM activity WHERE id = 7
+            """
+        )[0]
+        self.assertEqual(activity, {
+            "start_date": "2026-06-01",
+            "start_time": "10:00",
+            "member_registration_start": "2026-05-01",
+            "member_registration_end": "2026-05-10",
+            "non_member_registration_start": "2026-05-11",
+            "non_member_registration_end": "2026-05-20",
+        })
+
     def test_menu_opens_registration_period_for_selected_activity(self):
         today = date.today()
         activity_start = today + timedelta(days=30)

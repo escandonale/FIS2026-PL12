@@ -1,14 +1,16 @@
 import sqlite3
+from pathlib import Path
 
+from src.config import DATABASE
 from .actividades_modelo import get_actividades_disponibles, inscribir_socio
 
 
-def iniciar_inscripcion() -> None:
+def iniciar_inscripcion(db_path: str | Path = DATABASE) -> None:
     print("\n--- NUEVA INSCRIPCIÓN DE SOCIO ---")
     dni = input("Introduce el DNI del socio: ").strip()
 
     try:
-        actividades = get_actividades_disponibles()
+        actividades = get_actividades_disponibles(db_path)
         if not actividades:
             print("No hay actividades disponibles para inscripción.")
             return
@@ -28,9 +30,11 @@ def iniciar_inscripcion() -> None:
             print("El identificador de actividad debe ser numérico.")
             return
 
-        justificante = inscribir_socio(dni, activity_id)
+        justificante = inscribir_socio(dni, activity_id, db_path)
         print("\n--- JUSTIFICANTE DE INSCRIPCIÓN ---")
-        print(f"Socio: {justificante['nombre']} (Nº {justificante['numero_socio']})")
+        print(
+            f"Socio: {justificante['nombre']} (ID {justificante['socio_id']})"
+        )
         print(f"Actividad: {justificante['actividad']} ({justificante['nivel']})")
         print(f"Horario: {justificante['periodicidad']}")
         print(f"ESTADO: {justificante['estado'].upper()}")

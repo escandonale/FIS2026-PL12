@@ -48,9 +48,12 @@ Al iniciar la aplicación se informa de los solapamientos que ya existan en la
 base de datos y se bloquean las altas hasta corregirlos reasignando una de las
 actividades.
 
-La opción 4 del menú permite inscribir a un socio por su DNI. Los socios se
-guardan en `Socios` y cada inscripción en `Inscripciones`; las actividades
-utilizan las plazas ocupadas para confirmar la inscripción o añadirla a la
-lista de espera. `available_places` representa la capacidad total y
-`occupied_places` no puede ser negativo ni superarla. Los socios deben existir
-previamente en la tabla `Socios`.
+El menú permite asignar instalaciones (opción 3), configurar los plazos de
+inscripción para socios y no socios (opción 4), inscribir a un socio por su DNI
+(opción 5) y consultar la ocupación y las inscripciones (opción 6). Los plazos
+se guardan en la actividad y deben terminar antes de su fecha de inicio. La
+inscripción de socios solo se acepta durante el plazo configurado para ellos.
+Cada inscripción se guarda en `inscripcion`; las plazas ocupadas se confirman
+o se añaden a la lista de espera. `available_places` representa la capacidad
+total y `occupied_places` no puede ser negativo ni superarla. Los socios deben
+existir previamente en `Socios`.

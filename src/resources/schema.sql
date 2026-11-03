@@ -105,11 +105,12 @@ CREATE TABLE IF NOT EXISTS activity_day (
     FOREIGN KEY (activity_id) REFERENCES activity (id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS socios (
+CREATE TABLE IF NOT EXISTS Socios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT NOT NULL,
     apellidos TEXT NOT NULL,
     dni TEXT NOT NULL UNIQUE,
+    numero_socio TEXT UNIQUE,
     direccion TEXT NOT NULL
 );
 

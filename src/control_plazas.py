@@ -1,21 +1,13 @@
 from pathlib import Path
 
-from src.activities import list_activities
+from src.activities import list_activities, migrate_activity_installation
 from src.config import DATABASE, SCHEMA
+from src.fechas_inscripcion import migrate_registration_dates
 from src.util.database import DataBase
 
 
 def conectar_bd(db_name: str | Path = DATABASE) -> DataBase:
     return DataBase(db_name)
-
-
-def migrate_inscripcion_activity(database: DataBase) -> None:
-    columns = database.executeQuery("PRAGMA table_info(inscripcion)")
-    if not any(column["name"] == "activity_id" for column in columns):
-        database.executeUpdateQuery(
-            "ALTER TABLE inscripcion ADD COLUMN activity_id INTEGER "
-            "REFERENCES activity(id)"
-        )
 
 
 def get_activity_seat_report(
@@ -64,9 +56,11 @@ def get_activity_seat_report(
 
 
 def control_plazas(database: DataBase | None = None) -> None:
-    database = database or conectar_bd()
-    database.executeScript(SCHEMA)
-    migrate_inscripcion_activity(database)
+    if database is None:
+        database = conectar_bd()
+        database.executeScript(SCHEMA)
+        migrate_registration_dates(database)
+        migrate_activity_installation(database)
 
     activities = list_activities(database)
     if not activities:
