@@ -75,16 +75,15 @@ CREATE TABLE IF NOT EXISTS activity (
         )),
     level TEXT NOT NULL
         CHECK (level IN ('Iniciación', 'Medio', 'Avanzado')),
-    installation_id INTEGER,
+    installation_id INTEGER NOT NULL,
+    start_date TEXT,
     start_time TEXT NOT NULL,
     end_time TEXT NOT NULL,
     available_places INTEGER NOT NULL CHECK (available_places > 0),
-    occupied_places INTEGER NOT NULL DEFAULT 0
-        CHECK (occupied_places >= 0 AND occupied_places <= available_places),
-    ini_socio TEXT,
-    fin_socio TEXT,
-    ini_no_socio TEXT,
-    fin_no_socio TEXT,
+    member_registration_start TEXT,
+    member_registration_end TEXT,
+    non_member_registration_start TEXT,
+    non_member_registration_end TEXT,
     CHECK (end_time > start_time),
     FOREIGN KEY (category, installation_id)
         REFERENCES category_installation (category, installation_id)
@@ -106,20 +105,24 @@ CREATE TABLE IF NOT EXISTS activity_day (
     FOREIGN KEY (activity_id) REFERENCES activity (id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS Socios (
+CREATE TABLE IF NOT EXISTS socios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    dni TEXT UNIQUE NOT NULL,
     nombre TEXT NOT NULL,
     apellidos TEXT NOT NULL,
-    numero_socio TEXT UNIQUE NOT NULL
+    dni TEXT NOT NULL UNIQUE,
+    direccion TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS Inscripciones (
-    id_socio INTEGER NOT NULL,
-    id_actividad INTEGER NOT NULL,
-    estado TEXT NOT NULL CHECK (estado IN ('confirmada', 'lista_espera')),
-    fecha_solicitud DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (id_socio, id_actividad),
-    FOREIGN KEY (id_socio) REFERENCES Socios (id),
-    FOREIGN KEY (id_actividad) REFERENCES activity (id)
+CREATE TABLE IF NOT EXISTS inscripcion (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    activity_id INTEGER NOT NULL,
+    nombre TEXT NOT NULL,
+    apellidos TEXT NOT NULL,
+    dni TEXT NOT NULL,
+    estado TEXT NOT NULL
+        CHECK (estado IN ('confirmado', 'lista de espera')),
+    fecha_inscripcion TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    es_socio INTEGER NOT NULL DEFAULT 0
+        CHECK (es_socio IN (0, 1)),
+    FOREIGN KEY (activity_id) REFERENCES activity (id)
 );

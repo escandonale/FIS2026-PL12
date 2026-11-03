@@ -1,4 +1,4 @@
-from datetime import time
+from datetime import date, time
 from enum import Enum
 from typing import Iterable
 
@@ -45,19 +45,24 @@ def add_activity(
     start_time: str,
     end_time: str,
     available_places: int,
+    installation_id: int,
+    start_date: str | None = None,
 ) -> dict[str, object]:
     category = _parse_enum(ActivityCategory, category, "categoría")
     level = _parse_enum(ActivityLevel, level, "nivel")
     parsed_weekdays = _parse_weekdays(weekdays)
     validate_times(start_time, end_time)
+    if start_date is not None:
+        _parse_activity_date(start_date)
     if type(available_places) is not int or available_places <= 0:
         raise ValueError("El número de plazas debe ser un entero mayor que cero.")
     activity_id = database.executeTransaction(
         """
         INSERT INTO activity (
-            category, level, start_time, end_time, available_places
+            category, level, installation_id, start_date, start_time, end_time,
+            available_places
         )
-        SELECT ?, ?, ?, ?, ?
+        SELECT ?, ?, ?, ?, ?, ?, ?
         WHERE EXISTS (
             SELECT 1
             FROM offer
@@ -67,6 +72,8 @@ def add_activity(
         (
             category.value,
             level.value,
+            installation_id,
+            start_date,
             start_time,
             end_time,
             available_places,
@@ -92,6 +99,7 @@ def add_activity(
         "level": level.value,
         "installation": None,
         "weekdays": [weekday.value for weekday in parsed_weekdays],
+        "start_date": start_date,
         "start_time": start_time,
         "end_time": end_time,
         "available_places": available_places,
@@ -105,9 +113,8 @@ def get_activity(database: DataBase, activity_id: int) -> dict[str, object] | No
         """
         SELECT activity.id, activity.category, activity.level,
                installation.name AS installation,
-               activity.start_time, activity.end_time, activity.available_places,
-               activity.occupied_places, activity.ini_socio,
-               activity.fin_socio, activity.ini_no_socio, activity.fin_no_socio
+               activity.start_date, activity.start_time, activity.end_time,
+               activity.available_places
         FROM activity
         LEFT JOIN installation ON activity.installation_id = installation.id
         WHERE activity.id = ?
@@ -133,6 +140,7 @@ def get_activity(database: DataBase, activity_id: int) -> dict[str, object] | No
             for weekday in WEEKDAYS
             if weekday.value in weekday_values
         ],
+        "start_date": activity["start_date"],
         "start_time": activity["start_time"],
         "end_time": activity["end_time"],
         "available_places": activity["available_places"],
@@ -293,6 +301,7 @@ def list_activities(database: DataBase) -> list[dict[str, object]]:
             activity.category,
             activity.level,
             installation.name AS installation,
+            activity.start_date,
             activity.start_time,
             activity.end_time,
             activity.available_places,
@@ -328,6 +337,7 @@ def list_activities(database: DataBase) -> list[dict[str, object]]:
                 "level": row["level"],
                 "installation": row["installation"],
                 "weekdays": [],
+                "start_date": row["start_date"],
                 "start_time": row["start_time"],
                 "end_time": row["end_time"],
                 "available_places": row["available_places"],
@@ -449,6 +459,18 @@ def migrate_activity_installation(database: DataBase) -> None:
                 f"ALTER TABLE activity ADD COLUMN {column_name} TEXT"
             )
             columns = database.executeQuery("PRAGMA table_info(activity)")
+
+
+def _parse_activity_date(value: str) -> date:
+    try:
+        parsed_date = date.fromisoformat(value)
+    except (TypeError, ValueError):
+        raise ValueError(
+            "La fecha de inicio debe tener el formato AAAA-MM-DD."
+        ) from None
+    if parsed_date.isoformat() != value:
+        raise ValueError("La fecha de inicio debe tener el formato AAAA-MM-DD.")
+    return parsed_date
 
 
 def _parse_enum(enum_type: type[Enum], value: Enum | str, field: str):

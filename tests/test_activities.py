@@ -17,7 +17,8 @@ from src.activities import (
     migrate_activity_installation,
     set_activity_occupancy,
 )
-from main import _choose_weekdays, display_existing_conflicts, main, run_menu
+from main import _choose_weekdays, main, run_menu
+from src.control_plazas import control_plazas, get_activity_seat_report
 from src.util.database import DataBase
 from src.config import CONSTRAINTS
 from src.actividades.actividades_modelo import (
@@ -657,6 +658,101 @@ class ActivityFunctionsTests(unittest.TestCase):
                     run_menu(self.database)
 
         enrollment_mock.assert_called_once_with()
+
+    def test_activity_seat_report_counts_confirmed_and_lists_all_registrations(self):
+        activity = add_activity(
+            self.database,
+            "Pilates",
+            "Medio",
+            ["Lunes"],
+            "10:00",
+            "11:00",
+            2,
+            self.pilates_installation_id,
+        )
+        self.database.executeUpdateQuery(
+            """
+            INSERT INTO inscripcion (
+                activity_id, nombre, apellidos, dni, estado,
+                fecha_inscripcion, es_socio
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            activity["id"],
+            "Ana",
+            "García",
+            "11111111A",
+            "confirmado",
+            "2026-10-01",
+            1,
+        )
+        self.database.executeUpdateQuery(
+            """
+            INSERT INTO inscripcion (
+                activity_id, nombre, apellidos, dni, estado,
+                fecha_inscripcion, es_socio
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            activity["id"],
+            "Luis",
+            "Pérez",
+            "22222222B",
+            "lista de espera",
+            "2026-10-02",
+            0,
+        )
+
+        report = get_activity_seat_report(self.database, activity["id"])
+
+        self.assertEqual(report["installation"], "Gimnasio")
+        self.assertEqual(report["aforo_max"], 2)
+        self.assertEqual(report["plazas_ocupadas"], 1)
+        self.assertEqual(report["plazas_libres"], 1)
+        self.assertEqual(
+            [
+                (registration["nombre"], registration["estado"])
+                for registration in report["inscripciones"]
+            ],
+            [("Ana", "confirmado"), ("Luis", "lista de espera")],
+        )
+
+    def test_seat_control_menu_displays_activity_occupancy_and_registration_status(self):
+        activity = add_activity(
+            self.database,
+            "Pilates",
+            "Medio",
+            ["Lunes"],
+            "10:00",
+            "11:00",
+            2,
+            self.pilates_installation_id,
+        )
+        self.database.executeUpdateQuery(
+            """
+            INSERT INTO inscripcion (
+                activity_id, nombre, apellidos, dni, estado,
+                fecha_inscripcion, es_socio
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            activity["id"],
+            "Ana",
+            "García",
+            "11111111A",
+            "confirmado",
+            "2026-10-01",
+            1,
+        )
+        with patch("builtins.input", return_value=str(activity["id"])):
+            with patch("builtins.print") as print_mock:
+                control_plazas(self.database)
+
+        printed_text = "\n".join(
+            " ".join(str(argument) for argument in call.args)
+            for call in print_mock.call_args_list
+        )
+        self.assertIn("Aforo máximo: 2", printed_text)
+        self.assertIn("Plazas ocupadas: 1", printed_text)
+        self.assertIn("Plazas libres: 1", printed_text)
+        self.assertIn("Ana | García | Sí | 2026-10-01 | Inscrito", printed_text)
 
     def test_weekday_selector_adds_days_one_by_one_until_zero(self):
         with patch("builtins.input", side_effect=["1", "1", "3", "0"]):
