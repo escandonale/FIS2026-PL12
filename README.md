@@ -29,3 +29,31 @@ FIS2026-PL12\
 ├── test/              Tests unitarios (unittest / pytest)\
 ├── ideas HUs          Ideas para las historias de usuario\
 └── README.md          README para el proyecto de la asignatura\
+
+
+EJECUCIÓN DE LA APLICACIÓN
+
+Desde la carpeta raíz del proyecto, ejecutar `python main.py`.
+La aplicación inicializa el esquema SQLite si hace falta y muestra el menú
+de consola con las funcionalidades disponibles.
+
+Para gestionar actividades, primero se crea la actividad indicando categoría,
+nivel, días, horario y plazas. La asignación de una instalación se realiza
+después desde la opción correspondiente del menú; solo se ofrecen instalaciones
+compatibles con la categoría de la actividad.
+
+Una instalación no puede tener dos actividades simultáneas el mismo día. Los
+horarios contiguos (por ejemplo, 18:00-19:00 y 19:00-20:00) sí están permitidos.
+Al iniciar la aplicación se informa de los solapamientos que ya existan en la
+base de datos y se bloquean las altas hasta corregirlos reasignando una de las
+actividades.
+
+El menú permite asignar instalaciones (opción 3), configurar los plazos de
+inscripción para socios y no socios (opción 4), inscribir a un socio por su DNI
+(opción 5) y consultar la ocupación y las inscripciones (opción 6). Los plazos
+se guardan en la actividad y deben terminar antes de su fecha de inicio. La
+inscripción de socios solo se acepta durante el plazo configurado para ellos.
+Cada inscripción se guarda en `inscripcion`; las plazas ocupadas se confirman
+o se añaden a la lista de espera. `available_places` representa la capacidad
+total y `occupied_places` no puede ser negativo ni superarla. Los socios deben
+existir previamente en `Socios`.
