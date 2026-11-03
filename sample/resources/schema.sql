@@ -39,3 +39,15 @@ CREATE TABLE Inscripciones (
     FOREIGN KEY (id_socio) REFERENCES Socios(id),
     FOREIGN KEY (id_actividad) REFERENCES Actividades(id)
 );
+
+DROP TABLE IF EXISTS Inscripciones;
+CREATE TABLE Inscripciones (
+    id_socio INTEGER,
+    id_actividad INTEGER,
+    estado TEXT NOT NULL, -- 'confirmada', 'lista_espera', 'cancelada'
+    estado_pago TEXT DEFAULT 'pendiente', -- 'pendiente', 'pagado', 'anulado'
+    fecha_solicitud DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id_socio, id_actividad),
+    FOREIGN KEY (id_socio) REFERENCES Socios(id),
+    FOREIGN KEY (id_actividad) REFERENCES Actividades(id)
+);

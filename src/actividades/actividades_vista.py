@@ -1,5 +1,5 @@
-import sqlite3
-from pathlib import Path
+from actividades.actividades_modelo import get_actividades_disponibles, inscribir_socio
+from actividades.actividades_modelo import get_inscripciones_cancelables, cancelar_inscripcion
 
 from src.config import DATABASE
 from .actividades_modelo import get_actividades_disponibles, inscribir_socio
@@ -39,7 +39,31 @@ def iniciar_inscripcion(db_path: str | Path = DATABASE) -> None:
         print(f"Horario: {justificante['periodicidad']}")
         print(f"ESTADO: {justificante['estado'].upper()}")
         print("-----------------------------------")
-    except ValueError as error:
-        print(f"\nERROR: {error}")
-    except sqlite3.Error as error:
-        print(f"\nError al acceder a la base de datos: {error}")
+    except Exception as e:
+        print(f"\nERROR: {e}")
+
+
+def iniciar_cancelacion():
+    print("\n--- CANCELAR INSCRIPCIÓN ---")
+    dni = input("Introduce tu DNI: ")
+    
+    actividades = get_inscripciones_cancelables(dni)
+    
+    if not actividades:
+        print("No tienes inscripciones activas o el plazo de cancelación ha expirado.")
+        return
+        
+    print("\nTus actividades disponibles para cancelar:")
+    for act in actividades:
+        print(f"ID: {act['id']} | Nombre: {act['nombre']} | Estado actual: {act['estado']}")
+        
+    id_act = input("\nIntroduce el ID de la actividad que deseas cancelar (o 'salir'): ")
+    if id_act.lower() == 'salir':
+        return
+        
+    try:
+        if cancelar_inscripcion(dni, int(id_act)):
+            print("\n Tu inscripción ha sido cancelada correctamente.")
+            print("Tu plaza ha quedado libre y el pago asociado ha sido anulado.")
+    except Exception as e:
+        print(f"\n ERROR: {e}")
