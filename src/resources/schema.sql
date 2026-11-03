@@ -75,11 +75,16 @@ CREATE TABLE IF NOT EXISTS activity (
         )),
     level TEXT NOT NULL
         CHECK (level IN ('Iniciación', 'Medio', 'Avanzado')),
-    installation_id INTEGER NOT NULL,
+    installation_id INTEGER,
     start_date TEXT,
     start_time TEXT NOT NULL,
     end_time TEXT NOT NULL,
     available_places INTEGER NOT NULL CHECK (available_places > 0),
+    occupied_places INTEGER NOT NULL DEFAULT 0
+        CHECK (
+            occupied_places >= 0
+            AND occupied_places <= available_places
+        ),
     member_registration_start TEXT,
     member_registration_end TEXT,
     non_member_registration_start TEXT,
@@ -121,7 +126,7 @@ CREATE TABLE IF NOT EXISTS inscripcion (
     apellidos TEXT NOT NULL,
     dni TEXT NOT NULL,
     estado TEXT NOT NULL
-        CHECK (estado IN ('confirmado', 'lista de espera')),
+        CHECK (estado IN ('confirmado', 'lista de espera', 'cancelada')),
     fecha_inscripcion TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     es_socio INTEGER NOT NULL DEFAULT 0
         CHECK (es_socio IN (0, 1)),

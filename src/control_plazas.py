@@ -1,9 +1,11 @@
 from pathlib import Path
 
 from src.activities import list_activities, migrate_activity_installation
+from src.actividades.actividades_modelo import migrate_cancellation_status
 from src.config import DATABASE, SCHEMA
 from src.fechas_inscripcion import migrate_registration_dates
 from src.util.database import DataBase
+from src.util.unexpectedException import UnexpectedException
 
 
 def conectar_bd(db_name: str | Path = DATABASE) -> DataBase:
@@ -61,6 +63,7 @@ def control_plazas(database: DataBase | None = None) -> None:
         database.executeScript(SCHEMA)
         migrate_registration_dates(database)
         migrate_activity_installation(database)
+        migrate_cancellation_status(database)
 
     activities = list_activities(database)
     if not activities:
@@ -106,7 +109,11 @@ def control_plazas(database: DataBase | None = None) -> None:
         status = (
             "Inscrito"
             if registration["estado"] == "confirmado"
-            else "Lista de espera"
+            else (
+                "Lista de espera"
+                if registration["estado"] == "lista de espera"
+                else "Cancelada"
+            )
         )
         print(
             f"{registration['nombre']} | {registration['apellidos']} | "
@@ -115,4 +122,7 @@ def control_plazas(database: DataBase | None = None) -> None:
 
 
 if __name__ == "__main__":
-    control_plazas()
+    try:
+        control_plazas()
+    except UnexpectedException as error:
+        print(f"Error al acceder a la base de datos: {error}")

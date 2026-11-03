@@ -98,19 +98,10 @@ def add_activity(
             )
         raise RuntimeError("No se pudo registrar la actividad.")
 
-    return {
-        "id": activity_id,
-        "category": category.value,
-        "level": level.value,
-        "installation": None,
-        "weekdays": [weekday.value for weekday in parsed_weekdays],
-        "start_date": start_date,
-        "start_time": start_time,
-        "end_time": end_time,
-        "available_places": available_places,
-        "occupied_places": 0,
-        "occupancy_percentage": 0.0,
-    }
+    activity = get_activity(database, activity_id)
+    if activity is None:
+        raise RuntimeError("La actividad se guardó, pero no se pudo recuperar.")
+    return activity
 
 
 def get_activity(database: DataBase, activity_id: int) -> dict[str, object] | None:

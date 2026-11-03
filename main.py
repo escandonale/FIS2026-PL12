@@ -12,9 +12,10 @@ from src.activities import (
     migrate_activity_installation,
     validate_times,
 )
+from src.actividades.actividades_modelo import migrate_cancellation_status
 from src.control_plazas import control_plazas
 from src.config import CONSTRAINTS, DATABASE, SCHEMA
-from src.actividades.actividades_vista import iniciar_inscripcion
+from src.actividades.actividades_vista import iniciar_cancelacion, iniciar_inscripcion
 from src.fechas_inscripcion import (
     abrir_plazo_inscripcion,
     get_actividades_no_iniciadas,
@@ -30,6 +31,7 @@ def main() -> None:
         database.executeScript(SCHEMA)
         migrate_registration_dates(database)
         migrate_activity_installation(database)
+        migrate_cancellation_status(database)
         database.executeScript(CONSTRAINTS)
         run_menu(database)
     except UnexpectedException as error:
@@ -48,8 +50,9 @@ def run_menu(database: DataBase) -> None:
         print("2. Ver actividades")
         print("3. Asignar instalación")
         print("4. Abrir plazo de inscripción")
-        print("5. Inscribir socio")
+        print("5. Inscribir persona")
         print("6. Controlar plazas e inscripciones")
+        print("7. Cancelar inscripción")
 
         print("0. Salir")
         option = input("Selecciona una opción: ").strip()
@@ -116,8 +119,11 @@ def run_menu(database: DataBase) -> None:
             except UnexpectedException as error:
                 print(f"Error al acceder a la base de datos: {error}")
             continue
+        if option == "7":
+            iniciar_cancelacion(database.dbname)
+            continue
 
-        print("Opción no válida. Elige 1, 2, 3, 4, 5, 6 o 0.")
+        print("Opción no válida. Elige 1, 2, 3, 4, 5, 6, 7 o 0.")
 
 
 def display_activities(activities: list[dict[str, object]]) -> None:
@@ -222,6 +228,9 @@ def _assign_installation_from_input(database: DataBase) -> None:
         return
 
     installations = get_installations(database, activity["category"])
+    if not installations:
+        print("No hay instalaciones compatibles disponibles.")
+        return
     installation = _choose_installation(installations)
     assigned = assign_activity_to_installation(
         database, activity_id, installation["id"]
@@ -286,7 +295,9 @@ def _open_registration_period_from_input(database: DataBase) -> None:
         return
 
 
-def _choose_option(title: str, options: list[ActivityCategory | ActivityLevel]):
+def _choose_option(
+    title: str, options: list[ActivityCategory | ActivityLevel]
+) -> ActivityCategory | ActivityLevel:
     print(f"\n{title}:")
     for index, option in enumerate(options, start=1):
         print(f"{index}. {option.value}")
@@ -336,6 +347,8 @@ def _choose_weekdays() -> list[Weekday]:
 
 
 def _choose_installation(installations: list[Installation]) -> Installation:
+    if not installations:
+        raise ValueError("No hay instalaciones compatibles disponibles.")
     print("\nInstalaciones disponibles para esta categoría:")
     for index, installation in enumerate(installations, start=1):
         print(f"{index}. {installation['name']}")

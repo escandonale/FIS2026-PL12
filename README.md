@@ -18,15 +18,14 @@ ESTRUCTURA DEL PROYECTO
 
 
 FIS2026-PL12\
-├── resources/\
-│   ├── schema.sql     Esquema de la base de datos (se borra y recrea en cada arranque)\
-│   └── data.sql       Carga inicial de datos\
-├── src/               Código fuente\
-│   ├── main.py        Punto de entrada y configuración del logging (mensajes)\
-│   ├── config.py      Rutas de la base de datos y scripts SQL\
-│   ├── employees/     Capa de empleados (modelo y vista)\
-│   └── util/          Acceso a datos, validaciones y excepciones\
-├── test/              Tests unitarios (unittest / pytest)\
+├── main.py            Punto de entrada de la aplicación\
+├── src/               Código fuente y lógica de negocio\
+│   ├── activities.py  Gestión de actividades e instalaciones\
+│   ├── actividades/   Inscripciones y cancelaciones\
+│   ├── resources/     Esquema y restricciones SQLite\
+│   └── util/          Acceso a datos y excepciones\
+├── tests/             Tests unitarios (unittest)\
+├── sample/            Material heredado y ejemplos\
 ├── ideas HUs          Ideas para las historias de usuario\
 └── README.md          README para el proyecto de la asignatura\
 
@@ -34,8 +33,8 @@ FIS2026-PL12\
 EJECUCIÓN DE LA APLICACIÓN
 
 Desde la carpeta raíz del proyecto, ejecutar `python main.py`.
-La aplicación inicializa el esquema SQLite si hace falta y muestra el menú
-de consola con las funcionalidades disponibles.
+La aplicación aplica el esquema y migraciones compatibles sin borrar las
+actividades e inscripciones existentes y muestra el menú de consola.
 
 Para gestionar actividades, primero se crea la actividad indicando categoría,
 nivel, días, horario y plazas. La asignación de una instalación se realiza
@@ -49,11 +48,16 @@ base de datos y se bloquean las altas hasta corregirlos reasignando una de las
 actividades.
 
 El menú permite asignar instalaciones (opción 3), configurar los plazos de
-inscripción para socios y no socios (opción 4), inscribir a un socio por su DNI
-(opción 5) y consultar la ocupación y las inscripciones (opción 6). Los plazos
-se guardan en la actividad y deben terminar antes de su fecha de inicio. La
-inscripción de socios solo se acepta durante el plazo configurado para ellos.
-Cada inscripción se guarda en `inscripcion`; las plazas ocupadas se confirman
-o se añaden a la lista de espera. `available_places` representa la capacidad
-total y `occupied_places` no puede ser negativo ni superarla. Los socios deben
-existir previamente en `Socios`.
+inscripción para socios y no socios (opción 4), inscribir personas (opción 5),
+consultar ocupación e inscripciones (opción 6) y cancelar una inscripción
+(opción 7). Los plazos se guardan en la actividad y deben terminar antes de
+su fecha de inicio. Cada tipo de persona solo puede inscribirse durante su
+periodo. Los socios deben existir previamente en `Socios`; los no socios
+proporcionan sus datos al inscribirse.
+
+Las cancelaciones se permiten hasta 15 días antes del primer día del mes de
+inicio de la actividad. Al cancelar una plaza confirmada, se confirma la
+inscripción más antigua de la lista de espera; si no hay lista de espera, se
+libera la plaza. Cada inscripción se guarda en `inscripcion`.
+`available_places` representa la capacidad total y `occupied_places` no puede
+ser negativo ni superarla.

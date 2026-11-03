@@ -91,6 +91,8 @@ def abrir_plazo_inscripcion(
     )
     if not activity:
         raise ValueError("No existe una actividad con ese identificador.")
+    if activity[0]["start_date"] is None:
+        raise ValueError("La actividad no tiene fecha de inicio asignada.")
 
     parsed_member_start = _parse_date(member_start, "apertura de socios")
     parsed_member_end = _parse_date(member_end, "cierre de socios")
@@ -127,17 +129,22 @@ def abrir_plazo_inscripcion(
         non_member_start,
         non_member_end,
     )
-    database.executeUpdateQuery(
-        """
-        UPDATE activity
-        SET member_registration_start = ?,
-            member_registration_end = ?,
-            non_member_registration_start = ?,
-            non_member_registration_end = ?
-        WHERE id = ?
-        """,
-        *date_values,
-        activity_id,
+    database.executeTransactionQueries(
+        [
+            (
+                """
+                UPDATE activity
+                SET member_registration_start = ?,
+                    member_registration_end = ?,
+                    non_member_registration_start = ?,
+                    non_member_registration_end = ?
+                WHERE id = ?
+                """,
+                (*date_values, activity_id),
+            ),
+            ("UPDATE offer SET registrations_open = 1 WHERE id = 1", ()),
+        ],
+        expected_row_counts=(1, 1),
     )
     return {
         "activity_id": activity_id,

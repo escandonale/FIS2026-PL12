@@ -29,8 +29,12 @@ from src.fechas_inscripcion import abrir_plazo_inscripcion
 from src.util.database import DataBase
 from src.config import CONSTRAINTS
 from src.actividades.actividades_modelo import (
+    cancelar_inscripcion,
     get_actividades_disponibles,
+    get_inscripciones_cancelables,
+    inscribir_no_socio,
     inscribir_socio,
+    migrate_cancellation_status,
 )
 from src.util.unexpectedException import UnexpectedException
 
@@ -194,6 +198,254 @@ class ActivityFunctionsTests(unittest.TestCase):
                 "SELECT COUNT(*) AS count FROM inscripcion"
             )[0]["count"],
             0,
+        )
+
+    def test_available_activities_are_filtered_by_registration_group(self):
+        activity = add_activity(
+            self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 2
+        )
+        self._open_member_registration_period(activity["id"])
+
+        member_activities = get_actividades_disponibles(
+            self.database.dbname, es_socio=True
+        )
+        non_member_activities = get_actividades_disponibles(
+            self.database.dbname, es_socio=False
+        )
+
+        self.assertEqual([item["id"] for item in member_activities], [activity["id"]])
+        self.assertEqual(non_member_activities, [])
+
+    def test_non_member_enrollment_uses_its_own_registration_window(self):
+        activity = add_activity(
+            self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 2
+        )
+        today = date(2027, 5, 1)
+        self.database.executeUpdateQuery(
+            "UPDATE activity SET start_date = ? WHERE id = ?",
+            "2027-06-01",
+            activity["id"],
+        )
+        abrir_plazo_inscripcion(
+            self.database,
+            activity["id"],
+            today.isoformat(),
+            (today + timedelta(days=5)).isoformat(),
+            (today + timedelta(days=6)).isoformat(),
+            (today + timedelta(days=10)).isoformat(),
+            today=today,
+        )
+
+        receipt = inscribir_no_socio(
+            "87654321B",
+            "Luis",
+            "Pérez",
+            activity["id"],
+            self.database.dbname,
+            today=date(2027, 5, 7),
+        )
+
+        self.assertEqual(receipt["estado"], "confirmado")
+        registration = self.database.executeQuery(
+            "SELECT dni, es_socio FROM inscripcion WHERE activity_id = ?",
+            activity["id"],
+        )[0]
+        self.assertEqual(registration, {"dni": "87654321B", "es_socio": 0})
+
+    def test_cancelling_confirmed_registration_promotes_waiting_list(self):
+        activity = add_activity(
+            self.database,
+            "Pilates",
+            "Medio",
+            ["Lunes"],
+            "10:00",
+            "11:00",
+            1,
+            start_date="2027-06-01",
+        )
+        for dni, name, state in (
+            ("11111111A", "Ana", "confirmado"),
+            ("22222222B", "Luis", "lista de espera"),
+        ):
+            self.database.executeUpdateQuery(
+                """
+                INSERT INTO inscripcion (
+                    activity_id, nombre, apellidos, dni, estado, es_socio
+                ) VALUES (?, ?, ?, ?, ?, 1)
+                """,
+                activity["id"],
+                name,
+                "García",
+                dni,
+                state,
+            )
+        self.database.executeUpdateQuery(
+            "UPDATE activity SET occupied_places = 1 WHERE id = ?",
+            activity["id"],
+        )
+
+        self.assertTrue(
+            cancelar_inscripcion(
+                "11111111A",
+                activity["id"],
+                self.database.dbname,
+                today=date(2027, 5, 17),
+            )
+        )
+
+        statuses = self.database.executeQuery(
+            """
+            SELECT dni, estado FROM inscripcion
+            WHERE activity_id = ? ORDER BY id
+            """,
+            activity["id"],
+        )
+        self.assertEqual(statuses, [
+            {"dni": "11111111A", "estado": "cancelada"},
+            {"dni": "22222222B", "estado": "confirmado"},
+        ])
+        self.assertEqual(
+            get_activity(self.database, activity["id"])["occupied_places"], 1
+        )
+        self.assertEqual(
+            get_inscripciones_cancelables(
+                "11111111A", self.database.dbname, today=date(2027, 5, 17)
+            ),
+            [],
+        )
+
+    def test_cancellation_deadline_is_fifteen_days_before_activity_month(self):
+        activity = add_activity(
+            self.database,
+            "Pilates",
+            "Medio",
+            ["Lunes"],
+            "10:00",
+            "11:00",
+            1,
+            start_date="2027-06-30",
+        )
+        self.database.executeUpdateQuery(
+            """
+            INSERT INTO inscripcion (
+                activity_id, nombre, apellidos, dni, estado, es_socio
+            ) VALUES (?, ?, ?, ?, 'confirmado', 1)
+            """,
+            activity["id"],
+            "Ana",
+            "García",
+            "11111111A",
+        )
+        self.database.executeUpdateQuery(
+            "UPDATE activity SET occupied_places = 1 WHERE id = ?",
+            activity["id"],
+        )
+
+        eligible = get_inscripciones_cancelables(
+            "11111111A", self.database.dbname, today=date(2027, 5, 17)
+        )
+        expired = get_inscripciones_cancelables(
+            "11111111A", self.database.dbname, today=date(2027, 5, 18)
+        )
+
+        self.assertEqual(eligible[0]["fecha_limite_cancelacion"], "2027-05-17")
+        self.assertEqual(expired, [])
+        with self.assertRaisesRegex(ValueError, "terminó el 2027-05-17"):
+            cancelar_inscripcion(
+                "11111111A",
+                activity["id"],
+                self.database.dbname,
+                today=date(2027, 5, 18),
+            )
+        self.assertEqual(
+            get_activity(self.database, activity["id"])["occupied_places"], 1
+        )
+
+    def test_cancelling_confirmed_registration_without_waitlist_frees_seat(self):
+        activity = add_activity(
+            self.database,
+            "Pilates",
+            "Medio",
+            ["Lunes"],
+            "10:00",
+            "11:00",
+            1,
+            start_date="2027-06-01",
+        )
+        self.database.executeUpdateQuery(
+            """
+            INSERT INTO inscripcion (
+                activity_id, nombre, apellidos, dni, estado, es_socio
+            ) VALUES (?, ?, ?, ?, 'confirmado', 1)
+            """,
+            activity["id"],
+            "Ana",
+            "García",
+            "11111111A",
+        )
+        self.database.executeUpdateQuery(
+            "UPDATE activity SET occupied_places = 1 WHERE id = ?",
+            activity["id"],
+        )
+
+        cancelar_inscripcion(
+            "11111111A",
+            activity["id"],
+            self.database.dbname,
+            today=date(2027, 5, 17),
+        )
+
+        self.assertEqual(
+            get_activity(self.database, activity["id"])["occupied_places"], 0
+        )
+        self.assertEqual(
+            self.database.executeQuery(
+                "SELECT estado FROM inscripcion WHERE activity_id = ?",
+                activity["id"],
+            ),
+            [{"estado": "cancelada"}],
+        )
+
+    def test_cancellation_migration_preserves_existing_registrations(self):
+        legacy_database = DataBase(
+            Path(self.temp_dir.name) / "legacy_registrations.sqlite"
+        )
+        legacy_database.executeScriptFromString(
+            """
+            CREATE TABLE activity (id INTEGER PRIMARY KEY);
+            INSERT INTO activity VALUES (1);
+            CREATE TABLE inscripcion (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                activity_id INTEGER NOT NULL,
+                nombre TEXT NOT NULL,
+                apellidos TEXT NOT NULL,
+                dni TEXT NOT NULL,
+                estado TEXT NOT NULL
+                    CHECK (estado IN ('confirmado', 'lista de espera')),
+                fecha_inscripcion TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                es_socio INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (activity_id) REFERENCES activity (id)
+            );
+            INSERT INTO inscripcion (
+                activity_id, nombre, apellidos, dni, estado, es_socio
+            ) VALUES (1, 'Ana', 'García', '11111111A', 'confirmado', 1);
+            """
+        )
+
+        migrate_cancellation_status(legacy_database)
+        legacy_database.executeUpdateQuery(
+            "UPDATE inscripcion SET estado = 'cancelada' WHERE id = 1"
+        )
+
+        self.assertEqual(
+            legacy_database.executeQuery(
+                "SELECT dni, estado FROM inscripcion WHERE id = 1"
+            ),
+            [{"dni": "11111111A", "estado": "cancelada"}],
+        )
+        self.assertEqual(
+            legacy_database.executeQuery("PRAGMA foreign_key_check"),
+            [],
         )
 
     def test_full_activity_enrollment_is_added_to_waiting_list(self):
@@ -722,6 +974,14 @@ class ActivityFunctionsTests(unittest.TestCase):
                     run_menu(self.database)
 
             enrollment_mock.assert_called_once_with(self.database.dbname)
+
+    def test_console_menu_starts_cancellation_flow(self):
+        with patch("main.iniciar_cancelacion") as cancellation_mock:
+            with patch("builtins.input", side_effect=["7", "0"]):
+                with patch("builtins.print"):
+                    run_menu(self.database)
+
+            cancellation_mock.assert_called_once_with(self.database.dbname)
 
     def test_activity_seat_report_counts_confirmed_and_lists_all_registrations(self):
         activity = add_activity(

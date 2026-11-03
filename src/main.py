@@ -1,6 +1,11 @@
-from actividades.actividades_vista import iniciar_inscripcion
+import sys
+from pathlib import Path
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from main import main
+
 
 if __name__ == "__main__":
-    # Aquí deberías ejecutar primero un script que lea schema.sql y data.sql para inicializar la BD
-    # Pero asumiendo que la BD ya está creada:
-    iniciar_inscripcion()
+    main()

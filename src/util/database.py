@@ -87,6 +87,34 @@ class DataBase:
         finally:
             connection.close()
 
+    def executeTransactionQueries(
+        self,
+        queries: list[tuple[str, tuple[object, ...]]],
+        expected_row_counts: tuple[int, ...] | None = None,
+    ) -> None:
+        """Run related update statements atomically."""
+        if expected_row_counts is not None and len(expected_row_counts) != len(queries):
+            raise ValueError("Debe indicarse el número de filas de cada consulta.")
+
+        connection = self._connect()
+        try:
+            cursor = connection.cursor()
+            for index, (query, args) in enumerate(queries):
+                cursor.execute(query, args)
+                if (
+                    expected_row_counts is not None
+                    and cursor.rowcount != expected_row_counts[index]
+                ):
+                    raise sqlite3.DatabaseError(
+                        "La transacción no modificó el número de filas esperado."
+                    )
+            connection.commit()
+        except sqlite3.DatabaseError as error:
+            connection.rollback()
+            raise UnexpectedException(str(error)) from error
+        finally:
+            connection.close()
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.dbname)
         connection.row_factory = sqlite3.Row

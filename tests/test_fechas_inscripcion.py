@@ -5,7 +5,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from main import run_menu
-from src.activities import add_activity, get_installations
+from src.activities import (
+    RegistrationsAlreadyOpenError,
+    add_activity,
+    get_installations,
+)
 from src.config import SCHEMA
 from src.fechas_inscripcion import (
     abrir_plazo_inscripcion,
@@ -13,6 +17,7 @@ from src.fechas_inscripcion import (
     migrate_registration_dates,
 )
 from src.util.database import DataBase
+from src.util.unexpectedException import UnexpectedException
 
 
 class RegistrationDateTests(unittest.TestCase):
@@ -89,6 +94,38 @@ class RegistrationDateTests(unittest.TestCase):
             "non_member_registration_start": "2026-05-11",
             "non_member_registration_end": "2026-05-20",
         })
+        self.assertEqual(
+            self.database.executeQuery(
+                "SELECT registrations_open FROM offer WHERE id = 1"
+            )[0]["registrations_open"],
+            1,
+        )
+        with self.assertRaises(RegistrationsAlreadyOpenError):
+            add_activity(
+                self.database,
+                "Pilates",
+                "Medio",
+                ["Martes"],
+                "12:00",
+                "13:00",
+                10,
+            )
+
+    def test_opening_period_rolls_back_if_offer_cannot_be_updated(self):
+        self.database.executeUpdateQuery("DELETE FROM offer WHERE id = 1")
+
+        with self.assertRaises(UnexpectedException):
+            self._open_period()
+
+        stored_dates = self.database.executeQuery(
+            """
+            SELECT member_registration_start, member_registration_end,
+                   non_member_registration_start, non_member_registration_end
+            FROM activity WHERE id = ?
+            """,
+            self.activity["id"],
+        )[0]
+        self.assertTrue(all(value is None for value in stored_dates.values()))
 
     def test_rejects_invalid_registration_periods(self):
         invalid_periods = [
