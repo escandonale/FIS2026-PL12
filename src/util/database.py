@@ -14,6 +14,9 @@ class DataBase:
         with open(nameFile, "r", encoding="utf-8") as sql_file:
             sql_script = sql_file.read()
 
+        self.executeScriptFromString(sql_script)
+
+    def executeScriptFromString(self, sql_script: str) -> None:
         connection = self._connect()
         try:
             connection.executescript(sql_script)

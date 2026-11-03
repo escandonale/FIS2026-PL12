@@ -4,7 +4,10 @@ from src.activities import (
     RegistrationsAlreadyOpenError,
     Weekday,
     add_activity,
+    assign_activity_to_installation,
+    get_activity,
     get_installations,
+    list_installation_conflicts,
     list_activities,
     migrate_activity_installation,
     validate_times,
@@ -33,8 +36,13 @@ def main() -> None:
 
 def run_menu(database: DataBase) -> None:
     while True:
+        conflicts = list_installation_conflicts(database)
         print("\nCENTRO DEPORTIVO")
-        print("1. Añadir actividad")
+        if conflicts:
+            display_existing_conflicts(database, conflicts)
+            print("Las altas están bloqueadas hasta resolver los solapamientos.")
+        else:
+            print("1. Añadir actividad")
         print("2. Ver actividades")
         print("3. Abrir plazo de inscripción")
         print("4. Controlar plazas e inscripciones")
@@ -46,17 +54,22 @@ def run_menu(database: DataBase) -> None:
             print("Hasta luego.")
             return
         if option == "1":
+            if conflicts:
+                print("No se pueden añadir actividades hasta resolver los solapamientos.")
+                continue
             try:
                 activity = create_activity_from_input(database)
                 print("\nActividad añadida correctamente:")
                 print(f"Categoría: {activity['category']}")
                 print(f"Nivel: {activity['level']}")
-                print(f"Instalación: {activity['installation']}")
+                installation = activity["installation"] or "Pendiente de asignación"
+                print(f"Instalación: {installation}")
                 print(f"Días: {', '.join(activity['weekdays'])}")
                 print(
                     f"Horario: {activity['start_time']} - {activity['end_time']}"
                 )
-                print(f"Plazas disponibles: {activity['available_places']}")
+                print(f"Capacidad total: {activity['available_places']} plazas")
+                print("Ocupación: 0% (0 plazas)")
             except ValueError as error:
                 print(f"Datos no válidos: {error}")
             except RegistrationsAlreadyOpenError as error:
@@ -103,7 +116,31 @@ def display_activities(activities: list[dict[str, object]]) -> None:
         print(f"Días: {', '.join(activity['weekdays'])}")
         print(f"Fecha de inicio: {activity['start_date'] or 'Sin asignar'}")
         print(f"Horario: {activity['start_time']} - {activity['end_time']}")
-        print(f"Plazas disponibles: {activity['available_places']}")
+        print(
+            f"Ocupación: {activity['occupied_places']}/"
+            f"{activity['available_places']} plazas "
+            f"({activity['occupancy_percentage']}%)"
+        )
+
+
+def display_existing_conflicts(
+    database: DataBase, conflicts: list[dict[str, object]] | None = None
+) -> None:
+    if conflicts is None:
+        conflicts = list_installation_conflicts(database)
+    if not conflicts:
+        return
+
+    print("\nAVISO: Se han encontrado solapamientos ya existentes:")
+    for conflict in conflicts:
+        print(
+            f"- Actividades {conflict['first_activity_id']} y "
+            f"{conflict['second_activity_id']} en {conflict['installation']}, "
+            f"{conflict['weekday']}: "
+            f"{conflict['first_start_time']}-{conflict['first_end_time']} y "
+            f"{conflict['second_start_time']}-{conflict['second_end_time']}."
+        )
+    print("Usa «Asignar instalación a una actividad» para resolverlos.")
 
 
 def create_activity_from_input(database: DataBase) -> dict[str, object]:

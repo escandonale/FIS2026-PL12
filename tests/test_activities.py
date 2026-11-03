@@ -9,14 +9,22 @@ from src.activities import (
     RegistrationsAlreadyOpenError,
     Weekday,
     add_activity,
+    assign_activity_to_installation,
     get_installations,
     get_activity,
+    list_installation_conflicts,
     list_activities,
     migrate_activity_installation,
+    set_activity_occupancy,
 )
 from main import _choose_weekdays, main, run_menu
 from src.control_plazas import control_plazas, get_activity_seat_report
 from src.util.database import DataBase
+from src.config import CONSTRAINTS
+from src.actividades.actividades_modelo import (
+    get_actividades_disponibles,
+    inscribir_socio,
+)
 from src.util.unexpectedException import UnexpectedException
 
 
@@ -27,12 +35,8 @@ class ActivityFunctionsTests(unittest.TestCase):
         self.database = DataBase(database_path)
         schema_path = Path(__file__).parent.parent / "src" / "resources" / "schema.sql"
         self.database.executeScript(schema_path)
-        self.pilates_installation_id = get_installations(
-            self.database, "Pilates"
-        )[0]["id"]
-        self.swimming_installation_id = get_installations(
-            self.database, "Natación"
-        )[0]["id"]
+        migrate_activity_installation(self.database)
+        self.database.executeScript(CONSTRAINTS)
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -46,7 +50,6 @@ class ActivityFunctionsTests(unittest.TestCase):
             "10:00",
             "11:00",
             12,
-            self.swimming_installation_id,
         )
 
         self.assertEqual(
@@ -63,7 +66,6 @@ class ActivityFunctionsTests(unittest.TestCase):
             "10:00",
             "11:00",
             10,
-            self.pilates_installation_id,
         )
 
         first = add_activity(self.database, *details)
@@ -80,7 +82,6 @@ class ActivityFunctionsTests(unittest.TestCase):
             "10:00",
             "11:00",
             12,
-            self.pilates_installation_id,
         )
 
         activities = list_activities(self.database)
@@ -91,20 +92,380 @@ class ActivityFunctionsTests(unittest.TestCase):
             "weekdays": ["Lunes", "Miércoles"],
         })
 
-    def test_activity_must_use_an_installation_compatible_with_its_category(self):
+    def test_activity_occupancy_can_be_set_and_percentage_is_returned(self):
+        activity = add_activity(
+            self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 20
+        )
+
+        set_activity_occupancy(self.database, activity["id"], 15)
+
+        listed = list_activities(self.database)[0]
+        self.assertEqual(listed["occupied_places"], 15)
+        self.assertEqual(listed["occupancy_percentage"], 75.0)
+
+    def test_activity_occupancy_cannot_exceed_capacity(self):
+        activity = add_activity(
+            self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 20
+        )
+
+        with self.assertRaisesRegex(ValueError, "superar la capacidad"):
+            set_activity_occupancy(self.database, activity["id"], 21)
+
+    def test_confirmed_enrollment_updates_occupied_places(self):
+        activity = add_activity(
+            self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 2
+        )
+        self.database.executeUpdateQuery(
+            """
+            INSERT INTO Socios (dni, nombre, apellidos, numero_socio)
+            VALUES (?, ?, ?, ?)
+            """,
+            "12345678A",
+            "Ana",
+            "García",
+            "S001",
+        )
+
+        receipt = inscribir_socio(
+            "12345678A", activity["id"], self.database.dbname
+        )
+
+        self.assertEqual(receipt["estado"], "confirmada")
+        self.assertEqual(
+            get_actividades_disponibles(self.database.dbname)[0]["plazas_libres"],
+            1,
+        )
+        self.assertEqual(
+            get_activity(self.database, activity["id"])["occupied_places"], 1
+        )
+
+    def test_full_activity_enrollment_is_added_to_waiting_list(self):
+        activity = add_activity(
+            self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 1
+        )
+        set_activity_occupancy(self.database, activity["id"], 1)
+        self.database.executeUpdateQuery(
+            """
+            INSERT INTO Socios (dni, nombre, apellidos, numero_socio)
+            VALUES (?, ?, ?, ?)
+            """,
+            "12345678A",
+            "Ana",
+            "García",
+            "S001",
+        )
+
+        receipt = inscribir_socio(
+            "12345678A", activity["id"], self.database.dbname
+        )
+
+        self.assertEqual(receipt["estado"], "lista_espera")
+        self.assertEqual(
+            get_activity(self.database, activity["id"])["occupied_places"], 1
+        )
+
+    def test_duplicate_enrollment_is_rejected(self):
+        activity = add_activity(
+            self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 2
+        )
+        self.database.executeUpdateQuery(
+            """
+            INSERT INTO Socios (dni, nombre, apellidos, numero_socio)
+            VALUES (?, ?, ?, ?)
+            """,
+            "12345678A",
+            "Ana",
+            "García",
+            "S001",
+        )
+        inscribir_socio("12345678A", activity["id"], self.database.dbname)
+
+        with self.assertRaisesRegex(ValueError, "ya está inscrito"):
+            inscribir_socio("12345678A", activity["id"], self.database.dbname)
+
+    def test_activity_can_be_created_before_installation_is_assigned(self):
+        created = add_activity(
+            self.database,
+            "Pilates",
+            "Medio",
+            ["Lunes"],
+            "10:00",
+            "11:00",
+            12,
+        )
+
+        self.assertIsNone(created["installation"])
+        self.assertIsNone(get_activity(self.database, created["id"])["installation"])
+
+    def test_activity_must_be_assigned_to_compatible_installation(self):
+        activity = add_activity(
+            self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 12
+        )
+        swimming_installation_id = get_installations(
+            self.database, "Natación"
+        )[0]["id"]
+
         with self.assertRaisesRegex(ValueError, "no está adaptada"):
-            add_activity(
-                self.database,
-                "Pilates",
-                "Medio",
-                ["Lunes"],
-                "10:00",
-                "11:00",
-                12,
-                self.swimming_installation_id,
+            assign_activity_to_installation(
+                self.database, activity["id"], swimming_installation_id
             )
 
+    def test_activity_can_be_assigned_to_compatible_installation_later(self):
+        activity = add_activity(
+            self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 12
+        )
+        gym_id = get_installations(self.database, "Pilates")[0]["id"]
+
+        assignment = assign_activity_to_installation(
+            self.database, activity["id"], gym_id
+        )
+
+        self.assertEqual(assignment["installation"], "Gimnasio")
+        self.assertEqual(
+            get_activity(self.database, activity["id"])["installation"], "Gimnasio"
+        )
+
+    def test_overlapping_activity_cannot_be_assigned_to_same_installation(self):
+        thursday_activity = add_activity(
+            self.database, "Pilates", "Medio", ["Jueves"], "18:00", "20:00", 12
+        )
+        overlapping_activity = add_activity(
+            self.database,
+            "Acondicionamiento Físico",
+            "Avanzado",
+            ["Jueves"],
+            "19:00",
+            "21:00",
+            12,
+        )
+        gym_id = get_installations(self.database, "Pilates")[0]["id"]
+        assign_activity_to_installation(
+            self.database, thursday_activity["id"], gym_id
+        )
+
+        with self.assertRaisesRegex(ValueError, "ya está ocupada el Jueves"):
+            assign_activity_to_installation(
+                self.database, overlapping_activity["id"], gym_id
+            )
+
+        self.assertIsNone(
+            get_activity(self.database, overlapping_activity["id"])["installation"]
+        )
+
+    def test_adjacent_activities_can_use_same_installation(self):
+        first_activity = add_activity(
+            self.database, "Pilates", "Medio", ["Jueves"], "18:00", "19:00", 12
+        )
+        second_activity = add_activity(
+            self.database,
+            "Acondicionamiento Físico",
+            "Avanzado",
+            ["Jueves"],
+            "19:00",
+            "20:00",
+            12,
+        )
+        gym_id = get_installations(self.database, "Pilates")[0]["id"]
+
+        assign_activity_to_installation(self.database, first_activity["id"], gym_id)
+        assign_activity_to_installation(self.database, second_activity["id"], gym_id)
+
+        self.assertEqual(list_installation_conflicts(self.database), [])
+
+    def test_conflicts_on_a_different_weekday_do_not_block_assignment(self):
+        first_activity = add_activity(
+            self.database, "Pilates", "Medio", ["Jueves"], "18:00", "20:00", 12
+        )
+        second_activity = add_activity(
+            self.database,
+            "Acondicionamiento Físico",
+            "Avanzado",
+            ["Viernes"],
+            "18:00",
+            "20:00",
+            12,
+        )
+        gym_id = get_installations(self.database, "Pilates")[0]["id"]
+
+        assign_activity_to_installation(self.database, first_activity["id"], gym_id)
+        assign_activity_to_installation(self.database, second_activity["id"], gym_id)
+
+        self.assertEqual(list_installation_conflicts(self.database), [])
+
+    def test_database_trigger_rejects_overlapping_assignment(self):
+        first_activity = add_activity(
+            self.database, "Pilates", "Medio", ["Jueves"], "18:00", "20:00", 12
+        )
+        second_activity = add_activity(
+            self.database,
+            "Acondicionamiento Físico",
+            "Avanzado",
+            ["Jueves"],
+            "19:00",
+            "21:00",
+            12,
+        )
+        gym_id = get_installations(self.database, "Pilates")[0]["id"]
+        assign_activity_to_installation(self.database, first_activity["id"], gym_id)
+
+        with self.assertRaises(UnexpectedException):
+            self.database.executeUpdateQuery(
+                "UPDATE activity SET installation_id = ? WHERE id = ?",
+                gym_id,
+                second_activity["id"],
+            )
+
+    def test_database_trigger_rejects_overlapping_time_change(self):
+        first_activity = add_activity(
+            self.database, "Pilates", "Medio", ["Jueves"], "18:00", "20:00", 12
+        )
+        second_activity = add_activity(
+            self.database,
+            "Acondicionamiento Físico",
+            "Avanzado",
+            ["Jueves"],
+            "20:00",
+            "21:00",
+            12,
+        )
+        gym_id = get_installations(self.database, "Pilates")[0]["id"]
+        assign_activity_to_installation(self.database, first_activity["id"], gym_id)
+        assign_activity_to_installation(self.database, second_activity["id"], gym_id)
+
+        with self.assertRaises(UnexpectedException):
+            self.database.executeUpdateQuery(
+                "UPDATE activity SET start_time = ? WHERE id = ?",
+                "19:00",
+                second_activity["id"],
+            )
+
+    def test_database_trigger_rejects_overlapping_weekday_addition(self):
+        first_activity = add_activity(
+            self.database, "Pilates", "Medio", ["Jueves"], "18:00", "20:00", 12
+        )
+        second_activity = add_activity(
+            self.database,
+            "Acondicionamiento Físico",
+            "Avanzado",
+            ["Viernes"],
+            "18:00",
+            "20:00",
+            12,
+        )
+        gym_id = get_installations(self.database, "Pilates")[0]["id"]
+        assign_activity_to_installation(self.database, first_activity["id"], gym_id)
+        assign_activity_to_installation(self.database, second_activity["id"], gym_id)
+
+        with self.assertRaises(UnexpectedException):
+            self.database.executeUpdateQuery(
+                "INSERT INTO activity_day (activity_id, weekday) VALUES (?, ?)",
+                second_activity["id"],
+                "Jueves",
+            )
+
+    def test_startup_reports_preexisting_schedule_conflicts(self):
+        self.database.executeUpdateQuery(
+            "DROP TRIGGER prevent_activity_schedule_conflict_on_day_insert"
+        )
+        self.database.executeUpdateQuery(
+            """
+            INSERT INTO activity (
+                category, level, installation_id,
+                start_time, end_time, available_places
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            "Pilates",
+            "Medio",
+            get_installations(self.database, "Pilates")[0]["id"],
+            "18:00",
+            "20:00",
+            12,
+        )
+        self.database.executeUpdateQuery(
+            """
+            INSERT INTO activity (
+                category, level, installation_id,
+                start_time, end_time, available_places
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            "Acondicionamiento Físico",
+            "Avanzado",
+            get_installations(self.database, "Pilates")[0]["id"],
+            "19:00",
+            "21:00",
+            12,
+        )
+        self.database.executeUpdateQuery(
+            "INSERT INTO activity_day (activity_id, weekday) VALUES (?, ?)",
+            1,
+            "Jueves",
+        )
+        self.database.executeUpdateQuery(
+            "INSERT INTO activity_day (activity_id, weekday) VALUES (?, ?)",
+            2,
+            "Jueves",
+        )
+
+        conflicts = list_installation_conflicts(self.database)
+        self.database.executeScript(CONSTRAINTS)
+        with patch("builtins.print") as print_mock:
+            display_existing_conflicts(self.database)
+
+        self.assertEqual(len(conflicts), 1)
+        self.assertEqual(conflicts[0]["weekday"], "Jueves")
+        self.assertEqual(conflicts[0]["first_start_time"], "18:00")
+        self.assertEqual(conflicts[0]["second_start_time"], "19:00")
+        self.assertIn(
+            "18:00-20:00 y 19:00-21:00",
+            str(print_mock.call_args_list),
+        )
+
+    def test_existing_conflict_blocks_new_activity_until_resolved(self):
+        first_activity = add_activity(
+            self.database, "Pilates", "Medio", ["Jueves"], "18:00", "20:00", 12
+        )
+        second_activity = add_activity(
+            self.database,
+            "Acondicionamiento Físico",
+            "Avanzado",
+            ["Jueves"],
+            "19:00",
+            "21:00",
+            12,
+        )
+        gym_id = get_installations(self.database, "Pilates")[0]["id"]
+        self.database.executeUpdateQuery(
+            "UPDATE activity SET installation_id = ? WHERE id = ?",
+            gym_id,
+            first_activity["id"],
+        )
+        self.database.executeUpdateQuery(
+            "DROP TRIGGER prevent_activity_schedule_conflict_on_assignment"
+        )
+        self.database.executeUpdateQuery(
+            "UPDATE activity SET installation_id = ? WHERE id = ?",
+            gym_id,
+            second_activity["id"],
+        )
+        self.database.executeScript(CONSTRAINTS)
+
+        with patch("builtins.input", side_effect=["1", "0"]):
+            with patch("builtins.print") as print_mock:
+                run_menu(self.database)
+
+        self.assertEqual(
+            self.database.executeQuery("SELECT id FROM activity"),
+            [{"id": first_activity["id"]}, {"id": second_activity["id"]}],
+        )
+        self.assertIn(
+            "Las altas están bloqueadas",
+            str(print_mock.call_args_list),
+        )
+
     def test_database_rejects_incompatible_category_installation_pair(self):
+        swimming_installation_id = get_installations(
+            self.database, "Natación"
+        )[0]["id"]
         with self.assertRaises(UnexpectedException):
             self.database.executeUpdateQuery(
                 """
@@ -115,7 +476,7 @@ class ActivityFunctionsTests(unittest.TestCase):
                 """,
                 "Pilates",
                 "Medio",
-                self.swimming_installation_id,
+                swimming_installation_id,
                 "10:00",
                 "11:00",
                 12,
@@ -141,7 +502,6 @@ class ActivityFunctionsTests(unittest.TestCase):
             add_activity(
                 self.database,
                 "Boxeo", "Medio", ["Lunes"], "10:00", "11:00", 10,
-                self.pilates_installation_id,
             )
 
     def test_invalid_level_is_rejected(self):
@@ -149,7 +509,6 @@ class ActivityFunctionsTests(unittest.TestCase):
             add_activity(
                 self.database,
                 "Pilates", "Experto", ["Lunes"], "10:00", "11:00", 10,
-                self.pilates_installation_id,
             )
 
     def test_empty_days_are_rejected(self):
@@ -157,7 +516,6 @@ class ActivityFunctionsTests(unittest.TestCase):
             add_activity(
                 self.database,
                 "Pilates", "Medio", [], "10:00", "11:00", 10,
-                self.pilates_installation_id,
             )
 
     def test_invalid_time_range_is_rejected(self):
@@ -165,7 +523,6 @@ class ActivityFunctionsTests(unittest.TestCase):
             add_activity(
                 self.database,
                 "Pilates", "Medio", ["Lunes"], "11:00", "10:00", 10,
-                self.pilates_installation_id,
             )
 
     def test_invalid_capacity_is_rejected(self):
@@ -175,7 +532,6 @@ class ActivityFunctionsTests(unittest.TestCase):
                     add_activity(
                         self.database,
                         "Pilates", "Medio", ["Lunes"], "10:00", "11:00", capacity,
-                        self.pilates_installation_id,
                     )
 
     def test_activity_cannot_be_added_after_registrations_open(self):
@@ -187,7 +543,6 @@ class ActivityFunctionsTests(unittest.TestCase):
             add_activity(
                 self.database,
                 "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 10,
-                self.pilates_installation_id,
             )
 
     def test_invalid_input_does_not_create_activity(self):
@@ -195,7 +550,6 @@ class ActivityFunctionsTests(unittest.TestCase):
             add_activity(
                 self.database,
                 "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 0,
-                self.pilates_installation_id,
             )
 
         self.assertIsNone(get_activity(self.database, 1))
@@ -205,10 +559,9 @@ class ActivityFunctionsTests(unittest.TestCase):
             self.database.executeTransaction(
                 """
                 INSERT INTO activity (
-                    category, level, installation_id,
-                    start_time, end_time, available_places
+                    category, level, start_time, end_time, available_places
                 )
-                SELECT ?, ?, ?, ?, ?, ?
+                SELECT ?, ?, ?, ?, ?
                 WHERE EXISTS (
                     SELECT 1 FROM offer
                     WHERE id = 1 AND registrations_open = 0
@@ -216,9 +569,7 @@ class ActivityFunctionsTests(unittest.TestCase):
                 """,
                 (
                     "Pilates",
-                    "Medio",
-                    self.pilates_installation_id,
-                    "10:00",
+                    "Medio", "10:00",
                     "11:00",
                     10,
                 ),
@@ -237,7 +588,6 @@ class ActivityFunctionsTests(unittest.TestCase):
             "3",  # Wednesday
             "5",  # Friday
             "0",  # finish selecting days
-            "1",  # installation
             "10:00",
             "11:00",
             "12",
@@ -250,12 +600,31 @@ class ActivityFunctionsTests(unittest.TestCase):
         activity = get_activity(self.database, 1)
         self.assertEqual(activity["category"], "Pilates")
         self.assertEqual(activity["weekdays"], ["Lunes", "Miércoles", "Viernes"])
-        self.assertEqual(activity["installation"], "Gimnasio")
+        self.assertIsNone(activity["installation"])
         printed_text = "\n".join(
             " ".join(str(argument) for argument in call.args)
             for call in print_mock.call_args_list
         )
         self.assertIn("Actividad añadida correctamente", printed_text)
+
+    def test_console_menu_assigns_installation_after_activity_creation(self):
+        activity = add_activity(
+            self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 12
+        )
+        user_input = ["3", str(activity["id"]), "1", "0"]
+
+        with patch("builtins.input", side_effect=user_input):
+            with patch("builtins.print") as print_mock:
+                run_menu(self.database)
+
+        self.assertEqual(
+            get_activity(self.database, activity["id"])["installation"], "Gimnasio"
+        )
+        printed_text = "\n".join(
+            " ".join(str(argument) for argument in call.args)
+            for call in print_mock.call_args_list
+        )
+        self.assertIn("asignada", printed_text)
 
     def test_console_menu_displays_activity_list(self):
         add_activity(
@@ -266,7 +635,6 @@ class ActivityFunctionsTests(unittest.TestCase):
             "10:00",
             "11:00",
             12,
-            self.pilates_installation_id,
         )
         user_input = ["2", "0"]
 
@@ -281,7 +649,15 @@ class ActivityFunctionsTests(unittest.TestCase):
         self.assertIn("ACTIVIDADES DISPONIBLES", printed_text)
         self.assertIn("Pilates", printed_text)
         self.assertIn("Lunes", printed_text)
-        self.assertIn("Gimnasio", printed_text)
+        self.assertIn("Sin asignar", printed_text)
+
+    def test_console_menu_starts_member_enrollment(self):
+        with patch("main.iniciar_inscripcion") as enrollment_mock:
+            with patch("builtins.input", side_effect=["4", "0"]):
+                with patch("builtins.print"):
+                    run_menu(self.database)
+
+        enrollment_mock.assert_called_once_with()
 
     def test_activity_seat_report_counts_confirmed_and_lists_all_registrations(self):
         activity = add_activity(
@@ -397,7 +773,16 @@ class ActivityFunctionsTests(unittest.TestCase):
         )
         self.assertIn("activity", [table["name"] for table in tables])
         self.assertIn("installation", [table["name"] for table in tables])
+        self.assertIn("Socios", [table["name"] for table in tables])
+        self.assertIn("Inscripciones", [table["name"] for table in tables])
         self.assertIn("CENTRO DEPORTIVO", str(print_mock.call_args_list))
+        triggers = DataBase(database_path).executeQuery(
+            "SELECT name FROM sqlite_master WHERE type = 'trigger'"
+        )
+        self.assertIn(
+            "prevent_activity_schedule_conflict_on_assignment",
+            [trigger["name"] for trigger in triggers],
+        )
 
     def test_existing_database_is_migrated_without_dropping_activities(self):
         database_path = Path(self.temp_dir.name) / "legacy.sqlite"
@@ -431,9 +816,66 @@ class ActivityFunctionsTests(unittest.TestCase):
         migrate_activity_installation(legacy_database)
 
         activity = legacy_database.executeQuery(
-            "SELECT id, installation_id FROM activity WHERE id = 1"
+            "SELECT id, installation_id, occupied_places FROM activity WHERE id = 1"
         )[0]
         self.assertIsNone(activity["installation_id"])
+        self.assertEqual(activity["occupied_places"], 0)
+
+    def test_existing_database_with_required_installation_is_migrated(self):
+        database_path = Path(self.temp_dir.name) / "assigned_legacy.sqlite"
+        legacy_database = DataBase(database_path)
+        legacy_database.executeScriptFromString(
+            """
+            CREATE TABLE installation (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE
+            );
+            INSERT INTO installation VALUES (1, 'Gimnasio');
+
+            CREATE TABLE category_installation (
+                category TEXT NOT NULL,
+                installation_id INTEGER NOT NULL,
+                PRIMARY KEY (category, installation_id)
+            );
+            INSERT INTO category_installation VALUES ('Pilates', 1);
+
+            CREATE TABLE activity (
+                id INTEGER PRIMARY KEY,
+                category TEXT NOT NULL,
+                level TEXT NOT NULL,
+                installation_id INTEGER NOT NULL,
+                start_time TEXT NOT NULL,
+                end_time TEXT NOT NULL,
+                available_places INTEGER NOT NULL,
+                occupied_places INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO activity VALUES (
+                1, 'Pilates', 'Medio', 1, '10:00', '11:00', 12, 5
+            );
+
+            CREATE TABLE activity_day (
+                activity_id INTEGER NOT NULL,
+                weekday TEXT NOT NULL,
+                PRIMARY KEY (activity_id, weekday),
+                FOREIGN KEY (activity_id) REFERENCES activity (id) ON DELETE CASCADE
+            );
+            INSERT INTO activity_day VALUES (1, 'Lunes');
+            """
+        )
+        schema_path = Path(__file__).parent.parent / "src" / "resources" / "schema.sql"
+        legacy_database.executeScript(schema_path)
+
+        migrate_activity_installation(legacy_database)
+
+        activity = get_activity(legacy_database, 1)
+        self.assertEqual(activity["installation"], "Gimnasio")
+        self.assertEqual(activity["weekdays"], ["Lunes"])
+        self.assertEqual(activity["occupied_places"], 5)
+        columns = legacy_database.executeQuery("PRAGMA table_info(activity)")
+        installation_column = next(
+            column for column in columns if column["name"] == "installation_id"
+        )
+        self.assertEqual(installation_column["notnull"], 0)
 
 
 if __name__ == "__main__":
