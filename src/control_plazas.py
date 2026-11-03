@@ -121,8 +121,3 @@ def control_plazas(database: DataBase | None = None) -> None:
         )
 
 
-if __name__ == "__main__":
-    try:
-        control_plazas()
-    except UnexpectedException as error:
-        print(f"Error al acceder a la base de datos: {error}")

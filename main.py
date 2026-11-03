@@ -16,6 +16,7 @@ from src.actividades.actividades_modelo import migrate_cancellation_status
 from src.control_plazas import control_plazas
 from src.config import CONSTRAINTS, DATABASE, SCHEMA
 from src.actividades.actividades_vista import iniciar_cancelacion, iniciar_inscripcion
+from src.asistencia import iniciar_registro_asistencia
 from src.fechas_inscripcion import (
     abrir_plazo_inscripcion,
     get_actividades_no_iniciadas,
@@ -53,6 +54,7 @@ def run_menu(database: DataBase) -> None:
         print("5. Inscribir persona")
         print("6. Controlar plazas e inscripciones")
         print("7. Cancelar inscripción")
+        print("8. Registrar asistencia")
 
         print("0. Salir")
         option = input("Selecciona una opción: ").strip()
@@ -122,8 +124,14 @@ def run_menu(database: DataBase) -> None:
         if option == "7":
             iniciar_cancelacion(database.dbname)
             continue
+        if option == "8":
+            try:
+                iniciar_registro_asistencia(database)
+            except UnexpectedException as error:
+                print(f"Error al acceder a la base de datos: {error}")
+            continue
 
-        print("Opción no válida. Elige 1, 2, 3, 4, 5, 6, 7 o 0.")
+        print("Opción no válida. Elige 1, 2, 3, 4, 5, 6, 7, 8 o 0.")
 
 
 def display_activities(activities: list[dict[str, object]]) -> None:
