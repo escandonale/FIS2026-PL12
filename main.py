@@ -25,6 +25,8 @@ from src.util.database import DataBase
 from src.util.unexpectedException import UnexpectedException
 
 
+from src.usuarios.registro_usuarios_vista import iniciar_registro_no_socio
+
 def main() -> None:
     database = DataBase(DATABASE)
     try:
@@ -53,7 +55,7 @@ def run_menu(database: DataBase) -> None:
         print("5. Inscribir persona")
         print("6. Controlar plazas e inscripciones")
         print("7. Cancelar inscripción")
-
+        print("8. Registrar nuevo usuario (no socio)")
         print("0. Salir")
         option = input("Selecciona una opción: ").strip()
 
@@ -122,8 +124,11 @@ def run_menu(database: DataBase) -> None:
         if option == "7":
             iniciar_cancelacion(database.dbname)
             continue
-
-        print("Opción no válida. Elige 1, 2, 3, 4, 5, 6, 7 o 0.")
+        if option == "8":
+            iniciar_registro_no_socio(database.dbname)
+            continue
+        
+        print("Opción no válida. Elige 1, 2, 3, 4, 5, 6, 7, 8 o 0.")
 
 
 def display_activities(activities: list[dict[str, object]]) -> None:
