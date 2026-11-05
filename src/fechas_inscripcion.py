@@ -274,6 +274,9 @@ def configurar_inscripciones(
                 raise ValueError(
                     f"No se deben indicar fechas para la acción de {group}."
                 )
+            if action == "close":
+                dates[start_column] = None
+                dates[end_column] = None
             continue
         start_date = _parse_date(start_value, f"apertura de {group}")
         end_date = _parse_date(end_value, f"cierre de {group}")
@@ -323,6 +326,21 @@ def configurar_inscripciones(
                     f"de la actividad {activity['id']}."
                 )
 
+    member_status = _effective_registration_status(
+        "member",
+        member_action,
+        dates,
+        current_date,
+        current_offer[0]["member_registration_status"],
+    )
+    non_member_status = _effective_registration_status(
+        "non_member",
+        non_member_action,
+        dates,
+        current_date,
+        current_offer[0]["non_member_registration_status"],
+    )
+
     transaction: list[tuple[str, tuple[object, ...]]] = []
     for (
         action,
@@ -349,12 +367,32 @@ def configurar_inscripciones(
             )
         elif action in {"open", "close"}:
             status = "open" if action == "open" else "closed"
-            transaction.append(
-                (
-                    f"UPDATE offer SET {status_column} = ? WHERE id = 1",
-                    (status,),
+            if action == "close":
+                transaction.append(
+                    (
+                        f"""
+                        UPDATE offer
+                        SET {status_column} = ?,
+                            {start_column} = NULL, {end_column} = NULL
+                        WHERE id = 1
+                        """,
+                        (status,),
+                    )
                 )
-            )
+                transaction.append(
+                    (
+                        f"UPDATE activity SET {start_column} = NULL, "
+                        f"{end_column} = NULL",
+                        (),
+                    )
+                )
+            else:
+                transaction.append(
+                    (
+                        f"UPDATE offer SET {status_column} = ? WHERE id = 1",
+                        (status,),
+                    )
+                )
         elif action == "keep":
             continue
 
@@ -380,10 +418,15 @@ def configurar_inscripciones(
             (
                 """
                 UPDATE offer
-                SET registrations_open = 1
+                SET registrations_open = ?
                 WHERE id = 1
                 """,
-                (),
+                (
+                    int(
+                        member_status != "closed"
+                        or non_member_status != "closed"
+                    ),
+                ),
             )
         )
         database.executeTransactionQueries(transaction)
@@ -391,22 +434,10 @@ def configurar_inscripciones(
     return {
         "member_registration_start": dates["member_registration_start"],
         "member_registration_end": dates["member_registration_end"],
-        "member_registration_status": _effective_registration_status(
-            "member",
-            member_action,
-            dates,
-            current_date,
-            current_offer[0]["member_registration_status"],
-        ),
+        "member_registration_status": member_status,
         "non_member_registration_start": dates["non_member_registration_start"],
         "non_member_registration_end": dates["non_member_registration_end"],
-        "non_member_registration_status": _effective_registration_status(
-            "non_member",
-            non_member_action,
-            dates,
-            current_date,
-            current_offer[0]["non_member_registration_status"],
-        ),
+        "non_member_registration_status": non_member_status,
     }
 
 

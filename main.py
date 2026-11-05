@@ -58,6 +58,26 @@ def run_menu(database: DataBase) -> None:
     while True:
         conflicts = list_installation_conflicts(database)
         print("\nCENTRO DEPORTIVO")
+        registration_state = database.executeQuery(
+            """
+            SELECT member_registration_status, non_member_registration_status
+            FROM offer WHERE id = 1
+            """
+        )
+        if not registration_state:
+            raise UnexpectedException("No se ha inicializado la oferta de actividades.")
+        member_status = registration_state[0]["member_registration_status"]
+        non_member_status = registration_state[0]["non_member_registration_status"]
+        state_label = (
+            "ABIERTAS"
+            if "open" in {member_status, non_member_status}
+            else (
+                "CERRADAS"
+                if member_status == non_member_status == "closed"
+                else "PROGRAMADAS"
+            )
+        )
+        print(f"Inscripciones: {state_label}")
         if conflicts:
             display_existing_conflicts(database, conflicts)
             print("Las altas están bloqueadas hasta resolver los solapamientos.")
@@ -344,16 +364,29 @@ def _open_registration_period_from_input(database: DataBase) -> None:
         return
 
     print("\nEstado global de inscripción actualizado:")
-    print(
-        f"- Socios: {result['member_registration_status']} "
-        f"({result['member_registration_start'] or 'sin inicio programado'} - "
-        f"{result['member_registration_end'] or 'sin cierre programado'})"
-    )
-    print(
-        f"- No socios: {result['non_member_registration_status']} "
-        f"({result['non_member_registration_start'] or 'sin inicio programado'} - "
-        f"{result['non_member_registration_end'] or 'sin cierre programado'})"
-    )
+    for group, status_key, start_key, end_key in (
+        (
+            "Socios",
+            "member_registration_status",
+            "member_registration_start",
+            "member_registration_end",
+        ),
+        (
+            "No socios",
+            "non_member_registration_status",
+            "non_member_registration_start",
+            "non_member_registration_end",
+        ),
+    ):
+        status = result[status_key]
+        if status == "scheduled":
+            print(
+                f"- {group}: {status} "
+                f"({result[start_key] or 'sin inicio programado'} - "
+                f"{result[end_key] or 'sin cierre programado'})"
+            )
+        else:
+            print(f"- {group}: {status}")
     print("El cambio se aplica simultáneamente a todas las actividades.")
 
 

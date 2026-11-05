@@ -396,10 +396,40 @@ class RegistrationDateTests(unittest.TestCase):
             today=self.today,
         )
         self.assertEqual(closed["member_registration_status"], "closed")
+        self.assertIsNone(closed["member_registration_start"])
+        self.assertIsNone(closed["member_registration_end"])
         self.assertEqual(
             get_actividades_disponibles(self.database.dbname, es_socio=True),
             [],
         )
+        self.assertEqual(
+            self.database.executeQuery(
+                """
+                SELECT member_registration_start, member_registration_end
+                FROM offer WHERE id = 1
+                """
+            )[0],
+            {
+                "member_registration_start": None,
+                "member_registration_end": None,
+            },
+        )
+        self.assertEqual(
+            self.database.executeQuery(
+                "SELECT registrations_open FROM offer WHERE id = 1"
+            )[0]["registrations_open"],
+            0,
+        )
+        activity_after_closing = add_activity(
+            self.database,
+            "Pilates",
+            "Medio",
+            ["Miércoles"],
+            "14:00",
+            "15:00",
+            10,
+        )
+        self.assertIsNotNone(activity_after_closing)
 
     def test_global_registration_dates_require_valid_order_and_not_before_today(self):
         invalid_values = (
