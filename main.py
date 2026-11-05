@@ -1,4 +1,7 @@
-from src.activities import (
+from datetime import date
+from pathlib import Path
+
+from activitites import (
     ActivityCategory,
     ActivityLevel,
     Installation,
@@ -16,27 +19,36 @@ from src.activities import (
 )
 from src.actividades.actividades_modelo import migrate_cancellation_status
 from src.control_plazas import control_plazas
-from src.config import CONSTRAINTS, DATABASE, SCHEMA
+from src.config import CONSTRAINTS, DATA, DATABASE, SCHEMA
 from src.actividades.actividades_vista import iniciar_cancelacion, iniciar_inscripcion
+from src.asistencia import iniciar_registro_asistencia
 from src.fechas_inscripcion import (
-    abrir_plazo_inscripcion,
-    get_actividades_no_iniciadas,
+    configurar_inscripciones,
     migrate_registration_dates,
 )
 from src.util.database import DataBase
 from src.util.unexpectedException import UnexpectedException
 
 
-from src.usuarios.registro_usuarios_vista import iniciar_registro_no_socio
+from src.usuarios.registro_usuarios_vista import (
+    iniciar_registro_no_socio,
+    iniciar_registro_socio,
+)
+from src.usuarios.registrar_usuarios import migrar_genero
 
 def main() -> None:
+    database_exists = Path(DATABASE).is_file()
     database = DataBase(DATABASE)
     try:
         database.executeScript(SCHEMA)
+        migrar_genero(database)
         migrate_registration_dates(database)
         migrate_activity_installation(database)
         migrate_cancellation_status(database)
         database.executeScript(CONSTRAINTS)
+        if not database_exists:
+            # Comment this line to create an empty database instead.
+            database.executeScript(DATA)
         run_menu(database)
     except UnexpectedException as error:
         print(f"Error al acceder a la base de datos: {error}")
@@ -53,11 +65,14 @@ def run_menu(database: DataBase) -> None:
             print("1. Añadir actividad")
         print("2. Ver actividades")
         print("3. Asignar instalación")
-        print("4. Abrir plazo de inscripción")
+        print("4. Gestionar inscripciones globales")
         print("5. Inscribir persona")
         print("6. Controlar plazas e inscripciones")
         print("7. Cancelar inscripción")
         print("8. Registrar nuevo usuario (no socio)")
+        print("9. Registrar nuevo socio")
+        print("10. Registrar asistencia")
+
         print("0. Salir")
         option = input("Selecciona una opción: ").strip()
 
@@ -70,6 +85,8 @@ def run_menu(database: DataBase) -> None:
                 continue
             try:
                 activity = create_activity_from_input(database)
+                if activity is None:
+                    continue
                 print("\nActividad añadida correctamente:")
                 print(f"Categoría: {activity['category']}")
                 print(f"Nivel: {activity['level']}")
@@ -102,7 +119,7 @@ def run_menu(database: DataBase) -> None:
 
         if option == "3":
             try:
-                _assign_installation_from_input(database, require_confirmation=False)
+                _assign_installation_from_input(database)
             except ValueError as error:
                 print(error)
             except UnexpectedException as error:
@@ -127,10 +144,25 @@ def run_menu(database: DataBase) -> None:
             iniciar_cancelacion(database.dbname)
             continue
         if option == "8":
-            iniciar_registro_no_socio(database.dbname)
+            try:
+                iniciar_registro_no_socio(database.dbname)
+            except UnexpectedException as error:
+                print(f"Error al acceder a la base de datos: {error}")
             continue
-        
-        print("Opción no válida. Elige 1, 2, 3, 4, 5, 6, 7, 8 o 0.")
+        if option == "9":
+            try:
+                iniciar_registro_socio(database.dbname)
+            except UnexpectedException as error:
+                print(f"Error al acceder a la base de datos: {error}")
+            continue
+        if option == "10":
+            try:
+                iniciar_registro_asistencia(database)
+            except UnexpectedException as error:
+                print(f"Error al acceder a la base de datos: {error}")
+            continue
+
+        print("Opción no válida. Elige 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 o 0.")
 
 
 def display_activities(activities: list[dict[str, object]]) -> None:
@@ -170,7 +202,7 @@ def display_existing_conflicts(
     print("Usa «Asignar instalación a una actividad» para resolverlos.")
 
 
-def create_activity_from_input(database: DataBase) -> dict[str, object]:
+def create_activity_from_input(database: DataBase) -> dict[str, object] | None:
     category = _choose_option("Categoría", list(ActivityCategory))
     level = _choose_option("Nivel", list(ActivityLevel))
     weekdays = _choose_weekdays()
@@ -203,6 +235,19 @@ def create_activity_from_input(database: DataBase) -> dict[str, object]:
         except ValueError:
             print("El número de plazas debe ser un entero mayor que cero.")
 
+    print("\nResumen de la actividad:")
+    print(f"- Categoría: {category.value}")
+    print(f"- Nivel: {level.value}")
+    print(f"- Días: {', '.join(day.value for day in weekdays)}")
+    print(f"- Fecha de inicio: {start_date}")
+    print(f"- Horario: {start_time} - {end_time}")
+    print(f"- Plazas: {available_places}")
+    print("- Instalación: Sin asignar")
+    answer = input("¿Guardar la actividad? (s/n): ").strip().lower()
+    if answer not in {"s", "si", "sí"}:
+        print("Creación cancelada.")
+        return None
+
     return add_activity(
         database,
         category,
@@ -215,9 +260,7 @@ def create_activity_from_input(database: DataBase) -> dict[str, object]:
     )
 
 
-def _assign_installation_from_input(
-    database: DataBase, require_confirmation: bool = True
-) -> None:
+def _assign_installation_from_input(database: DataBase) -> None:
     activities = list_unassigned_activities(database)
     if not activities:
         print("Todavía no hay actividades pendientes de asignación.")
@@ -237,26 +280,28 @@ def _assign_installation_from_input(
         print("No existe una actividad con ese identificador o nombre.")
         return
 
-    print("\nResumen de la actividad:")
-    print(f"- Actividad: {activity['category']} - {activity['level']}")
-    print(f"- Días: {', '.join(activity['weekdays'])}")
-    print(f"- Horario: {activity['start_time']} - {activity['end_time']}")
-    print(f"- Inicio: {activity['start_date'] or 'Sin asignar'}")
-
     installations = get_installations(database, activity["category"])
     if not installations:
         print("No hay instalaciones compatibles disponibles.")
         return
     installation = _choose_installation(installations)
 
-    print("\nVa a asignar la siguiente instalación:")
-    print(f"- Instalación: {installation['name']}")
+    print("\nResumen de la asignación:")
+    print(f"- ID: {activity['id']}")
     print(f"- Actividad: {activity['category']} - {activity['level']}")
-    if require_confirmation:
-        answer = input("¿Confirmar asignación? (s/n): ").strip().lower()
-        if answer not in {"s", "si", "sí", "yes", "y"}:
-            print("Operación cancelada.")
-            return
+    print(f"- Días: {', '.join(activity['weekdays'])}")
+    print(f"- Fecha de inicio: {activity['start_date'] or 'Sin asignar'}")
+    print(f"- Horario: {activity['start_time']} - {activity['end_time']}")
+    print(f"- Plazas: {activity['available_places']}")
+    print(
+        f"- Ocupación: {activity['occupied_places']}/"
+        f"{activity['available_places']} ({activity['occupancy_percentage']}%)"
+    )
+    print(f"- Espacio: {installation['name']}")
+    answer = input("¿Guardar la asignación? (s/n): ").strip().lower()
+    if answer not in {"s", "si", "sí"}:
+        print("Operación cancelada.")
+        return
 
     assigned = assign_activity_to_installation(
         database, activity["id"], installation["id"]
@@ -268,57 +313,98 @@ def _assign_installation_from_input(
 
 
 def _open_registration_period_from_input(database: DataBase) -> None:
-    activities = get_actividades_no_iniciadas(database)
-    if not activities:
-        print("No hay actividades futuras con fecha de inicio asignada.")
-        return
+    print("\nGESTIÓN GLOBAL DE INSCRIPCIONES")
+    print("Elige una acción para socios y otra para no socios.")
+    print("1. Programar apertura y cierre")
+    print("2. Abrir ahora")
+    print("3. Cerrar ahora")
+    print("4. No cambiar")
+    member_action = _choose_registration_action("socios")
+    non_member_action = _choose_registration_action("no socios")
 
-    print("\nACTIVIDADES NO INICIADAS")
-    for activity in activities:
-        print(
-            f"[{activity['id']}] {activity['category']} - {activity['level']} "
-            f"| Inicio: {activity['start_date']}"
-        )
+    member_start = member_end = None
+    non_member_start = non_member_end = None
+    if member_action == "schedule":
+        member_start, member_end = _prompt_registration_dates("socios")
+    if non_member_action == "schedule":
+        non_member_start, non_member_end = _prompt_registration_dates("no socios")
 
-    selection = input("\nIntroduce el ID de la actividad: ").strip()
     try:
-        activity_id = int(selection)
-    except ValueError:
-        print("Introduce un ID válido.")
-        return
-    if not any(activity["id"] == activity_id for activity in activities):
-        print("El ID no corresponde a una actividad no iniciada.")
+        result = configurar_inscripciones(
+            database,
+            member_action,
+            non_member_action,
+            member_start,
+            member_end,
+            non_member_start,
+            non_member_end,
+        )
+    except ValueError as error:
+        print(f"Datos no válidos: {error}")
         return
 
+    print("\nEstado global de inscripción actualizado:")
+    print(
+        f"- Socios: {result['member_registration_status']} "
+        f"({result['member_registration_start'] or 'sin inicio programado'} - "
+        f"{result['member_registration_end'] or 'sin cierre programado'})"
+    )
+    print(
+        f"- No socios: {result['non_member_registration_status']} "
+        f"({result['non_member_registration_start'] or 'sin inicio programado'} - "
+        f"{result['non_member_registration_end'] or 'sin cierre programado'})"
+    )
+    print("El cambio se aplica simultáneamente a todas las actividades.")
+
+
+def _choose_registration_action(group: str) -> str:
+    options = {
+        "1": "schedule",
+        "2": "open",
+        "3": "close",
+        "4": "keep",
+    }
     while True:
-        member_start = input(
-            "Inicio de inscripción para socios (AAAA-MM-DD): "
+        selection = input(f"Acción para {group} (1/2/3/4): ").strip()
+        if selection in options:
+            return options[selection]
+        print("Selecciona 1, 2, 3 o 4.")
+
+
+def _prompt_registration_dates(group: str) -> tuple[str, str]:
+    while True:
+        start_value = input(
+            f"Fecha de apertura para {group} (AAAA-MM-DD, hoy o posterior): "
         ).strip()
-        member_end = input(
-            "Fin de inscripción para socios (AAAA-MM-DD): "
-        ).strip()
-        non_member_start = input(
-            "Inicio de inscripción para no socios (AAAA-MM-DD): "
-        ).strip()
-        non_member_end = input(
-            "Fin de inscripción para no socios (AAAA-MM-DD): "
-        ).strip()
-        try:
-            period = abrir_plazo_inscripcion(
-                database,
-                activity_id,
-                member_start,
-                member_end,
-                non_member_start,
-                non_member_end,
-            )
-        except ValueError as error:
-            print(f"Datos no válidos: {error}")
+        start_date = _parse_input_date(start_value, "apertura")
+        if start_date is None:
             continue
-        print(
-            f"Plazo de inscripción abierto para la actividad {period['activity_id']}."
-        )
-        return
+        if start_date < date.today():
+            print("La fecha de apertura no puede ser anterior a hoy.")
+            continue
+
+        end_value = input(
+            f"Fecha de cierre para {group} (AAAA-MM-DD, posterior a la apertura): "
+        ).strip()
+        end_date = _parse_input_date(end_value, "cierre")
+        if end_date is None:
+            continue
+        if end_date <= start_date:
+            print("La fecha de cierre debe ser posterior a la de apertura.")
+            continue
+        return start_date.isoformat(), end_date.isoformat()
+
+
+def _parse_input_date(value: str, field: str) -> date | None:
+    try:
+        parsed_date = date.fromisoformat(value)
+    except ValueError:
+        print(f"La fecha de {field} debe tener el formato AAAA-MM-DD.")
+        return None
+    if parsed_date.isoformat() != value:
+        print(f"La fecha de {field} debe tener el formato AAAA-MM-DD.")
+        return None
+    return parsed_date
 
 
 def _find_activity_by_reference(

@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from main import run_menu
-from src.activities import (
+from activitites import (
     RegistrationsAlreadyOpenError,
     _minimum_activity_start_date,
     add_activity,
@@ -14,9 +14,11 @@ from src.activities import (
 from src.config import SCHEMA
 from src.fechas_inscripcion import (
     abrir_plazo_inscripcion,
+    configurar_inscripciones,
     get_actividades_no_iniciadas,
     migrate_registration_dates,
 )
+from src.actividades.actividades_modelo import get_actividades_disponibles
 from src.util.database import DataBase
 from src.util.unexpectedException import UnexpectedException
 
@@ -142,6 +144,8 @@ class RegistrationDateTests(unittest.TestCase):
         invalid_periods = [
             ({"member_start": "2026-04-30"}, "anterior"),
             ({"member_start": "2026-05-10"}, "posterior"),
+            ({"member_start": "2026-13-01"}, "formato"),
+            ({"member_start": "2026-05-32"}, "formato"),
             ({"non_member_start": "2026-05-10"}, "después"),
             ({"non_member_end": "2026-05-11"}, "posterior"),
             ({"non_member_end": "2026-06-01"}, "antes"),
@@ -278,23 +282,37 @@ class RegistrationDateTests(unittest.TestCase):
             "non_member_registration_end": "2026-05-20",
         })
 
-    def test_menu_opens_registration_period_for_selected_activity(self):
+    def test_menu_schedules_global_registration_periods(self):
         today = date.today()
-        activity_start = today + timedelta(days=30)
+        second_activity = add_activity(
+            self.database,
+            "Pilates",
+            "Medio",
+            ["Martes"],
+            "12:00",
+            "13:00",
+            10,
+        )
+        self.database.executeUpdateQuery(
+            "UPDATE activity SET start_date = ? WHERE id = ?",
+            (today + timedelta(days=30)).isoformat(),
+            self.activity["id"],
+        )
+        self.database.executeUpdateQuery(
+            "UPDATE activity SET start_date = ? WHERE id = ?",
+            (today + timedelta(days=30)).isoformat(),
+            second_activity["id"],
+        )
         inputs = [
             "4",
-            str(self.activity["id"]),
+            "1",
+            "1",
             today.isoformat(),
             (today + timedelta(days=5)).isoformat(),
             (today + timedelta(days=6)).isoformat(),
             (today + timedelta(days=10)).isoformat(),
             "0",
         ]
-        self.database.executeUpdateQuery(
-            "UPDATE activity SET start_date = ? WHERE id = ?",
-            activity_start.isoformat(),
-            self.activity["id"],
-        )
 
         with patch("builtins.input", side_effect=inputs):
             with patch("builtins.print") as print_mock:
@@ -312,7 +330,92 @@ class RegistrationDateTests(unittest.TestCase):
             stored_activity["non_member_registration_end"],
             (today + timedelta(days=10)).isoformat(),
         )
+        second_activity_dates = self.database.executeQuery(
+            """
+            SELECT member_registration_start, non_member_registration_end
+            FROM activity WHERE id = ?
+            """,
+            second_activity["id"],
+        )[0]
+        self.assertEqual(
+            second_activity_dates["member_registration_start"], today.isoformat()
+        )
+        self.assertEqual(
+            second_activity_dates["non_member_registration_end"],
+            (today + timedelta(days=10)).isoformat(),
+        )
         self.assertIn(
-            "Plazo de inscripción abierto",
+            "todas las actividades",
             str(print_mock.call_args_list),
         )
+        self.assertEqual(
+            self.database.executeQuery(
+                "SELECT member_registration_start, non_member_registration_end "
+                "FROM offer WHERE id = 1"
+            )[0],
+            {
+                "member_registration_start": today.isoformat(),
+                "non_member_registration_end": (today + timedelta(days=10)).isoformat(),
+            },
+        )
+
+    def test_open_now_and_close_now_apply_globally_per_group(self):
+        second_activity = add_activity(
+            self.database,
+            "Pilates",
+            "Medio",
+            ["Martes"],
+            "12:00",
+            "13:00",
+            10,
+        )
+        configured = configurar_inscripciones(
+            self.database,
+            member_action="open",
+            non_member_action="close",
+            today=self.today,
+        )
+
+        self.assertEqual(configured["member_registration_status"], "open")
+        self.assertEqual(configured["non_member_registration_status"], "closed")
+        self.assertEqual(
+            [activity["id"] for activity in get_actividades_disponibles(
+                self.database.dbname, es_socio=True
+            )],
+            [self.activity["id"], second_activity["id"]],
+        )
+        self.assertEqual(
+            get_actividades_disponibles(self.database.dbname, es_socio=False),
+            [],
+        )
+
+        closed = configurar_inscripciones(
+            self.database,
+            member_action="close",
+            non_member_action="keep",
+            today=self.today,
+        )
+        self.assertEqual(closed["member_registration_status"], "closed")
+        self.assertEqual(
+            get_actividades_disponibles(self.database.dbname, es_socio=True),
+            [],
+        )
+
+    def test_global_registration_dates_require_valid_order_and_not_before_today(self):
+        invalid_values = (
+            ("2026-13-01", "2026-05-10"),
+            ("2026-05-32", "2026-06-01"),
+            ("2026-04-30", "2026-05-10"),
+            ("2026-05-01", "2026-05-01"),
+        )
+        for start, end in invalid_values:
+            with self.subTest(start=start, end=end):
+                with self.assertRaises(ValueError):
+                    configurar_inscripciones(
+                        self.database,
+                        member_action="schedule",
+                        member_start=start,
+                        member_end=end,
+                        non_member_action="keep",
+                        today=self.today,
+                    )

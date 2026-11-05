@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.activities import list_activities, migrate_activity_installation
+from activitites import list_activities, migrate_activity_installation
 from src.actividades.actividades_modelo import migrate_cancellation_status
 from src.config import DATABASE, SCHEMA
 from src.fechas_inscripcion import migrate_registration_dates
@@ -121,8 +121,3 @@ def control_plazas(database: DataBase | None = None) -> None:
         )
 
 
-if __name__ == "__main__":
-    try:
-        control_plazas()
-    except UnexpectedException as error:
-        print(f"Error al acceder a la base de datos: {error}")

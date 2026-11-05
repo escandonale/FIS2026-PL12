@@ -103,6 +103,12 @@ def get_actividades_disponibles(
                 activity.end_time,
                 activity.available_places,
                 activity.occupied_places,
+                offer.member_registration_start,
+                offer.member_registration_end,
+                offer.member_registration_status,
+                offer.non_member_registration_start,
+                offer.non_member_registration_end,
+                offer.non_member_registration_status,
                 (
                     SELECT group_concat(weekday, ', ')
                     FROM (
@@ -121,26 +127,25 @@ def get_actividades_disponibles(
                     )
                 ) AS weekdays
             FROM activity
+            CROSS JOIN offer
             LEFT JOIN installation
                 ON installation.id = activity.installation_id
+            WHERE offer.id = 1
         """
         parameters: tuple[str, ...] = ()
         if es_socio is not None:
-            start_column = (
-                "member_registration_start"
-                if es_socio
-                else "non_member_registration_start"
-            )
-            end_column = (
-                "member_registration_end"
-                if es_socio
-                else "non_member_registration_end"
-            )
+            group_prefix = "member" if es_socio else "non_member"
             today = date.today().isoformat()
-            query += (
-                f"WHERE activity.{start_column} <= ? "
-                f"AND activity.{end_column} >= ? "
-            )
+            query += f"""
+                AND (
+                    offer.{group_prefix}_registration_status = 'open'
+                    OR (
+                        offer.{group_prefix}_registration_status = 'scheduled'
+                        AND offer.{group_prefix}_registration_start <= ?
+                        AND offer.{group_prefix}_registration_end >= ?
+                    )
+                )
+            """
             parameters = (today, today)
         query += "ORDER BY activity.id"
         activities = connection.execute(query, parameters).fetchall()
@@ -273,7 +278,7 @@ def _crear_inscripcion(
     if duplicate:
         raise ValueError("El DNI ya está inscrito en esta actividad.")
 
-    _validate_registration_window(activity, es_socio, today)
+    _validate_registration_window(connection, es_socio, today)
     state = "lista de espera"
     if activity["occupied_places"] < activity["available_places"]:
         state = "confirmado"
@@ -331,23 +336,35 @@ def _crear_inscripcion(
 
 
 def _validate_registration_window(
-    activity: sqlite3.Row, es_socio: bool, today: date
+    connection: sqlite3.Connection, es_socio: bool, today: date
 ) -> None:
     if es_socio:
-        start_column = "member_registration_start"
-        end_column = "member_registration_end"
+        group_prefix = "member"
         group_name = "socios"
     else:
-        start_column = "non_member_registration_start"
-        end_column = "non_member_registration_end"
+        group_prefix = "non_member"
         group_name = "no socios"
 
-    period_start = activity[start_column]
-    period_end = activity[end_column]
+    offer = connection.execute(
+        f"""
+        SELECT {group_prefix}_registration_start AS period_start,
+               {group_prefix}_registration_end AS period_end,
+               {group_prefix}_registration_status AS status
+        FROM offer
+        WHERE id = 1
+        """
+    ).fetchone()
+    if offer is None:
+        raise ValueError("No se ha inicializado la oferta de actividades.")
+    if offer["status"] == "closed":
+        raise ValueError(f"El plazo de inscripción para {group_name} está cerrado.")
+    if offer["status"] == "open":
+        return
+
+    period_start = offer["period_start"]
+    period_end = offer["period_end"]
     if period_start is None and period_end is None:
-        raise ValueError(
-            f"No hay un plazo de inscripción para {group_name} configurado."
-        )
+        raise ValueError(f"No hay un plazo de inscripción para {group_name} configurado.")
     if period_start is None or period_end is None:
         raise ValueError(f"El plazo de inscripción para {group_name} está incompleto.")
 

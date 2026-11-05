@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from src.activities import (
+from activitites import (
     ActivityCategory,
     ActivityLevel,
     RegistrationsAlreadyOpenError,
@@ -37,6 +37,11 @@ from src.actividades.actividades_modelo import (
     inscribir_no_socio,
     inscribir_socio,
     migrate_cancellation_status,
+)
+from src.usuarios.registrar_usuarios import (
+    migrar_genero,
+    registrar_no_socio,
+    registrar_socio,
 )
 from src.util.unexpectedException import UnexpectedException
 
@@ -125,6 +130,135 @@ class ActivityFunctionsTests(unittest.TestCase):
             "weekdays": ["Lunes", "Miércoles"],
         })
 
+    def test_register_member_and_non_member_are_validated_and_unique(self):
+        member = registrar_socio(
+            "Ana",
+            "García",
+            "f",
+            "12345678Z",
+            "S001",
+            "Calle Mayor 1",
+            self.database.dbname,
+        )
+        self.assertEqual(member, "12345678Z")
+        self.assertEqual(
+            self.database.executeQuery(
+                "SELECT genero FROM Socios WHERE dni = ?", "12345678Z"
+            )[0]["genero"],
+            "f",
+        )
+
+        with self.assertRaisesRegex(ValueError, "DNI"):
+            registrar_socio(
+                "Ana",
+                "Otra",
+                "f",
+                "12345678Z",
+                "S002",
+                "Calle 2",
+                self.database.dbname,
+            )
+
+        with self.assertRaisesRegex(ValueError, "como socio"):
+            registrar_no_socio(
+                "Ana",
+                "García",
+                "1998-03-20",
+                "f",
+                "Calle Mayor 1",
+                "12345678Z",
+                "ana@example.com",
+                self.database.dbname,
+            )
+
+        created = registrar_no_socio(
+            "Ana",
+            "García",
+            "1998-03-20",
+            "f",
+            "Calle Mayor 1",
+            "12345678Y",
+            "ana@example.com",
+            self.database.dbname,
+        )
+        self.assertTrue(created)
+        self.assertEqual(
+            self.database.executeQuery(
+                "SELECT genero FROM no_socio WHERE dni = ?", "12345678Y"
+            )[0]["genero"],
+            "f",
+        )
+
+        with self.assertRaisesRegex(ValueError, "como no socio"):
+            registrar_socio(
+                "Ana",
+                "García",
+                "f",
+                "12345678Y",
+                "S003",
+                "Calle Mayor 1",
+                self.database.dbname,
+            )
+
+        with self.assertRaisesRegex(ValueError, "formato"):
+            registrar_no_socio(
+                "Luis",
+                "Pérez",
+                "19980320",
+                "m",
+                "Calle 2",
+                "99999999X",
+                "luis@example.com",
+                self.database.dbname,
+            )
+
+        with self.assertRaisesRegex(ValueError, "m, f o n"):
+            registrar_socio(
+                "Luis",
+                "Pérez",
+                "masculino",
+                "99999999X",
+                "S004",
+                "Calle 2",
+                self.database.dbname,
+            )
+
+        with self.assertRaisesRegex(ValueError, "m, f o n"):
+            registrar_no_socio(
+                "Luis",
+                "Pérez",
+                "1998-03-20",
+                "masculino",
+                "Calle 2",
+                "99999999X",
+                "luis@example.com",
+                self.database.dbname,
+            )
+
+        with self.assertRaisesRegex(ValueError, "futura"):
+            registrar_no_socio(
+                "Luis",
+                "Pérez",
+                (date.today() + timedelta(days=1)).isoformat(),
+                "m",
+                "Calle 2",
+                "99999999X",
+                "luis@example.com",
+                self.database.dbname,
+            )
+
+        with self.assertRaisesRegex(ValueError, "DNI"):
+            registrar_no_socio(
+                "Ana",
+                "Otra",
+                "1995-06-10",
+                "f",
+                "Calle 2",
+                "12345678Y",
+                "otra@example.com",
+                self.database.dbname,
+            )
+
     def test_activity_occupancy_can_be_set_and_percentage_is_returned(self):
         activity = add_activity(
             self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 20
@@ -161,12 +295,18 @@ class ActivityFunctionsTests(unittest.TestCase):
         )
 
         with patch("builtins.input", side_effect=[str(activity["id"]), "1", "s"]):
-            _assign_installation_from_input(self.database)
+            with patch("builtins.print") as print_mock:
+                _assign_installation_from_input(self.database)
 
         self.assertEqual(
             get_activity(self.database, activity["id"])["installation"],
             "Gimnasio",
         )
+        printed_text = "\n".join(
+            " ".join(str(argument) for argument in call.args)
+            for call in print_mock.call_args_list
+        )
+        self.assertIn("Espacio: Gimnasio", printed_text)
 
     def test_activity_occupancy_cannot_exceed_capacity(self):
         activity = add_activity(
@@ -176,6 +316,70 @@ class ActivityFunctionsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "superar la capacidad"):
             set_activity_occupancy(self.database, activity["id"], 21)
 
+    def test_assignment_can_be_cancelled_before_saving(self):
+        activity = add_activity(
+            self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 10
+        )
+
+        with patch("builtins.input", side_effect=[str(activity["id"]), "1", "n"]):
+            _assign_installation_from_input(self.database)
+
+        self.assertIsNone(get_activity(self.database, activity["id"])["installation"])
+
+    def test_legacy_member_schema_is_migrated_with_gender_validation(self):
+        legacy_path = Path(self.temp_dir.name) / "legacy.sqlite"
+        legacy_database = DataBase(legacy_path)
+        legacy_database.executeScriptFromString(
+            """
+            CREATE TABLE Socios (
+                id INTEGER PRIMARY KEY,
+                nombre TEXT NOT NULL,
+                apellidos TEXT NOT NULL,
+                dni TEXT NOT NULL UNIQUE,
+                numero_socio TEXT UNIQUE,
+                direccion TEXT NOT NULL
+            );
+            CREATE TABLE no_socio (
+                id INTEGER PRIMARY KEY,
+                nombre TEXT NOT NULL,
+                apellidos TEXT NOT NULL,
+                fecha_nacimiento TEXT NOT NULL,
+                genero TEXT NOT NULL,
+                direccion TEXT NOT NULL,
+                dni TEXT NOT NULL UNIQUE,
+                correo TEXT NOT NULL
+            );
+            """
+        )
+
+        migrar_genero(legacy_database)
+        legacy_database.executeUpdateQuery(
+            """
+            INSERT INTO Socios (nombre, apellidos, dni, numero_socio, direccion, genero)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            "Ana",
+            "Prueba",
+            "12345678Z",
+            "S001",
+            "Calle 1",
+            "m",
+        )
+        with self.assertRaises(UnexpectedException):
+            legacy_database.executeUpdateQuery(
+                """
+                INSERT INTO Socios (
+                    nombre, apellidos, dni, numero_socio, direccion, genero
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                "Luis",
+                "Prueba",
+                "87654321X",
+                "S002",
+                "Calle 2",
+                "x",
+            )
+
     def test_confirmed_enrollment_updates_occupied_places(self):
         activity = add_activity(
             self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 2
@@ -184,14 +388,15 @@ class ActivityFunctionsTests(unittest.TestCase):
         self.database.executeUpdateQuery(
             """
             INSERT INTO Socios (
-                dni, nombre, apellidos, numero_socio, direccion
-            ) VALUES (?, ?, ?, ?, ?)
+                dni, nombre, apellidos, numero_socio, direccion, genero
+            ) VALUES (?, ?, ?, ?, ?, ?)
             """,
             "12345678A",
             "Ana",
             "García",
             "S001",
             "Calle Mayor 1",
+            "f",
         )
 
         receipt = inscribir_socio(
@@ -214,14 +419,15 @@ class ActivityFunctionsTests(unittest.TestCase):
         self.database.executeUpdateQuery(
             """
             INSERT INTO Socios (
-                dni, nombre, apellidos, numero_socio, direccion
-            ) VALUES (?, ?, ?, ?, ?)
+                dni, nombre, apellidos, numero_socio, direccion, genero
+            ) VALUES (?, ?, ?, ?, ?, ?)
             """,
             "12345678A",
             "Ana",
             "García",
             "S001",
             "Calle Mayor 1",
+            "f",
         )
 
         with self.assertRaisesRegex(ValueError, "No hay un plazo"):
@@ -491,14 +697,15 @@ class ActivityFunctionsTests(unittest.TestCase):
         self.database.executeUpdateQuery(
             """
             INSERT INTO Socios (
-                dni, nombre, apellidos, numero_socio, direccion
-            ) VALUES (?, ?, ?, ?, ?)
+                dni, nombre, apellidos, numero_socio, direccion, genero
+            ) VALUES (?, ?, ?, ?, ?, ?)
             """,
             "12345678A",
             "Ana",
             "García",
             "S001",
             "Calle Mayor 1",
+            "f",
         )
 
         receipt = inscribir_socio(
@@ -518,14 +725,15 @@ class ActivityFunctionsTests(unittest.TestCase):
         self.database.executeUpdateQuery(
             """
             INSERT INTO Socios (
-                dni, nombre, apellidos, numero_socio, direccion
-            ) VALUES (?, ?, ?, ?, ?)
+                dni, nombre, apellidos, numero_socio, direccion, genero
+            ) VALUES (?, ?, ?, ?, ?, ?)
             """,
             "12345678A",
             "Ana",
             "García",
             "S001",
             "Calle Mayor 1",
+            "f",
         )
         inscribir_socio("12345678A", activity["id"], self.database.dbname)
 
@@ -988,6 +1196,7 @@ class ActivityFunctionsTests(unittest.TestCase):
             "10:00",
             "11:00",
             "12",
+            "s",  # save activity
             "0",  # exit
         ]
         with patch("builtins.input", side_effect=user_input):
@@ -1004,11 +1213,36 @@ class ActivityFunctionsTests(unittest.TestCase):
         )
         self.assertIn("Actividad añadida correctamente", printed_text)
 
+    def test_console_menu_can_cancel_activity_creation(self):
+        user_input = [
+            "1",
+            "2",
+            "1",
+            "1",
+            "0",
+            _minimum_activity_start_date(date.today()).isoformat(),
+            "10:00",
+            "11:00",
+            "12",
+            "n",
+            "0",
+        ]
+        with patch("builtins.input", side_effect=user_input):
+            with patch("builtins.print") as print_mock:
+                run_menu(self.database)
+
+        self.assertEqual(list_activities(self.database), [])
+        printed_text = "\n".join(
+            " ".join(str(argument) for argument in call.args)
+            for call in print_mock.call_args_list
+        )
+        self.assertIn("Creación cancelada", printed_text)
+
     def test_console_menu_assigns_installation_after_activity_creation(self):
         activity = add_activity(
             self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 12
         )
-        user_input = ["3", str(activity["id"]), "1", "0"]
+        user_input = ["3", str(activity["id"]), "1", "s", "0"]
 
         with patch("builtins.input", side_effect=user_input):
             with patch("builtins.print") as print_mock:
@@ -1022,6 +1256,73 @@ class ActivityFunctionsTests(unittest.TestCase):
             for call in print_mock.call_args_list
         )
         self.assertIn("asignada", printed_text)
+
+    def test_console_menu_registers_non_member_user(self):
+        user_input = [
+            "8",
+            "f",
+            "Ana",
+            "García",
+            "1998-03-20",
+            "Calle Mayor 1",
+            "12345678Z",
+            "ana@example.com",
+            "0",
+        ]
+
+        with patch("builtins.input", side_effect=user_input):
+            with patch("builtins.print") as print_mock:
+                run_menu(self.database)
+
+        self.assertEqual(
+            self.database.executeQuery(
+                "SELECT COUNT(*) AS count FROM no_socio WHERE dni = ?",
+                "12345678Z",
+            )[0]["count"],
+            1,
+        )
+        printed_text = "\n".join(
+            " ".join(str(argument) for argument in call.args)
+            for call in print_mock.call_args_list
+        )
+        self.assertIn("REGISTRO COMPLETADO", printed_text)
+
+    def test_console_menu_registers_member_user(self):
+        user_input = [
+            "9",
+            "masculino",
+            "n",
+            "Ana",
+            "García",
+            "12345678Z",
+            "S001",
+            "Calle Mayor 1",
+            "0",
+        ]
+
+        with patch("builtins.input", side_effect=user_input):
+            with patch("builtins.print") as print_mock:
+                run_menu(self.database)
+
+        self.assertEqual(
+            self.database.executeQuery(
+                "SELECT COUNT(*) AS count FROM Socios WHERE dni = ?",
+                "12345678Z",
+            )[0]["count"],
+            1,
+        )
+        self.assertEqual(
+            self.database.executeQuery(
+                "SELECT genero FROM Socios WHERE dni = ?", "12345678Z"
+            )[0]["genero"],
+            "n",
+        )
+        printed_text = "\n".join(
+            " ".join(str(argument) for argument in call.args)
+            for call in print_mock.call_args_list
+        )
+        self.assertIn("m = masculino, f = femenino, n = no decirlo", printed_text)
+        self.assertIn("REGISTRO DE SOCIO COMPLETADO", printed_text)
 
     def test_console_menu_displays_activity_list(self):
         add_activity(

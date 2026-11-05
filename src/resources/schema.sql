@@ -1,7 +1,15 @@
 CREATE TABLE IF NOT EXISTS offer (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     registrations_open INTEGER NOT NULL DEFAULT 0
-        CHECK (registrations_open IN (0, 1))
+        CHECK (registrations_open IN (0, 1)),
+    member_registration_start TEXT,
+    member_registration_end TEXT,
+    non_member_registration_start TEXT,
+    non_member_registration_end TEXT,
+    member_registration_status TEXT NOT NULL DEFAULT 'scheduled'
+        CHECK (member_registration_status IN ('scheduled', 'open', 'closed')),
+    non_member_registration_status TEXT NOT NULL DEFAULT 'scheduled'
+        CHECK (non_member_registration_status IN ('scheduled', 'open', 'closed'))
 );
 
 INSERT OR IGNORE INTO offer (id, registrations_open) VALUES (1, 0);
@@ -124,7 +132,21 @@ CREATE TABLE IF NOT EXISTS Socios (
     apellidos TEXT NOT NULL,
     dni TEXT NOT NULL UNIQUE,
     numero_socio TEXT UNIQUE,
-    direccion TEXT NOT NULL
+    direccion TEXT NOT NULL,
+    genero TEXT NOT NULL CHECK (genero IN ('m', 'f', 'n'))
+);
+
+CREATE TABLE IF NOT EXISTS no_socio (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,
+    apellidos TEXT NOT NULL,
+    fecha_nacimiento TEXT NOT NULL,
+    genero TEXT NOT NULL,
+    direccion TEXT NOT NULL,
+    dni TEXT NOT NULL UNIQUE,
+    correo TEXT NOT NULL,
+    fecha_registro TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (genero IN ('m', 'f', 'n'))
 );
 
 CREATE TABLE IF NOT EXISTS inscripcion (
