@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from activitites import list_installation_conflicts
+from src.activities import list_installation_conflicts
 from src.config import CONSTRAINTS, DATA, SCHEMA
 from src.util.database import DataBase
 

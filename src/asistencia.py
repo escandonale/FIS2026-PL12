@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-from activitites import list_activities
+from src.activities import list_activities
 from src.util.database import DataBase
 from src.util.unexpectedException import UnexpectedException
 

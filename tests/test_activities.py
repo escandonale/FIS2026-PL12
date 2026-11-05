@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from activitites import (
+from src.activities import (
     ActivityCategory,
     ActivityLevel,
     RegistrationsAlreadyOpenError,

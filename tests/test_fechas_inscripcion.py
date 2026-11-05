@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from main import run_menu
-from activitites import (
+from src.activities import (
     RegistrationsAlreadyOpenError,
     _minimum_activity_start_date,
     add_activity,

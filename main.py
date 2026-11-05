@@ -1,7 +1,7 @@
 from datetime import date
 from pathlib import Path
 
-from activitites import (
+from src.activities import (
     ActivityCategory,
     ActivityLevel,
     Installation,
