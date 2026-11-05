@@ -89,6 +89,14 @@ CREATE TABLE IF NOT EXISTS activity (
     member_registration_end TEXT,
     non_member_registration_start TEXT,
     non_member_registration_end TEXT,
+    CHECK (
+        start_time GLOB '[01][0-9]:[0-5][0-9]'
+        OR start_time GLOB '2[0-3]:[0-5][0-9]'
+    ),
+    CHECK (
+        end_time GLOB '[01][0-9]:[0-5][0-9]'
+        OR end_time GLOB '2[0-3]:[0-5][0-9]'
+    ),
     CHECK (end_time > start_time),
     FOREIGN KEY (category, installation_id)
         REFERENCES category_installation (category, installation_id)

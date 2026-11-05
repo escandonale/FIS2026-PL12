@@ -17,8 +17,10 @@ from src.activities import (
     list_activities,
     migrate_activity_installation,
     set_activity_occupancy,
+    _minimum_activity_start_date,
 )
 from main import (
+    _assign_installation_from_input,
     _choose_weekdays,
     display_existing_conflicts,
     main,
@@ -133,6 +135,38 @@ class ActivityFunctionsTests(unittest.TestCase):
         listed = list_activities(self.database)[0]
         self.assertEqual(listed["occupied_places"], 15)
         self.assertEqual(listed["occupancy_percentage"], 75.0)
+
+    def test_list_unassigned_activities_ignores_assigned_ones(self):
+        unassigned = add_activity(
+            self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 10
+        )
+        assigned = add_activity(
+            self.database, "Natación", "Iniciación", ["Miércoles"], "12:00", "13:00", 8
+        )
+        natacion_installation_id = get_installations(self.database, "Natación")[0]["id"]
+        assign_activity_to_installation(
+            self.database, assigned["id"], natacion_installation_id
+        )
+
+        activities = list_activities(self.database)
+        unassigned_activities = [
+            activity for activity in activities if activity["installation"] is None
+        ]
+
+        self.assertEqual([activity["id"] for activity in unassigned_activities], [unassigned["id"]])
+
+    def test_assign_installation_requires_confirmation(self):
+        activity = add_activity(
+            self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 10
+        )
+
+        with patch("builtins.input", side_effect=[str(activity["id"]), "1", "s"]):
+            _assign_installation_from_input(self.database)
+
+        self.assertEqual(
+            get_activity(self.database, activity["id"])["installation"],
+            "Gimnasio",
+        )
 
     def test_activity_occupancy_cannot_exceed_capacity(self):
         activity = add_activity(
@@ -840,6 +874,53 @@ class ActivityFunctionsTests(unittest.TestCase):
                 "Pilates", "Medio", ["Lunes"], "11:00", "10:00", 10,
             )
 
+    def test_activity_times_must_be_within_the_day(self):
+        for start_time, end_time in (
+            ("24:00", "25:00"),
+            ("10:00", "10:60"),
+        ):
+            with self.subTest(start_time=start_time, end_time=end_time):
+                with self.assertRaisesRegex(ValueError, "00:00 y 23:59"):
+                    add_activity(
+                        self.database,
+                        "Pilates", "Medio", ["Lunes"],
+                        start_time, end_time, 10,
+                    )
+
+        activity = add_activity(
+            self.database,
+            "Pilates", "Medio", ["Lunes"], "00:00", "23:59", 10,
+        )
+        self.assertEqual(activity["start_time"], "00:00")
+        self.assertEqual(activity["end_time"], "23:59")
+
+    def test_database_rejects_out_of_range_activity_times(self):
+        with self.assertRaisesRegex(UnexpectedException, "invalid_activity_time"):
+            self.database.executeUpdateQuery(
+                """
+                INSERT INTO activity (
+                    category, level, start_time, end_time, available_places
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                "Pilates", "Medio", "24:00", "25:00", 10,
+            )
+
+    def test_activity_start_date_must_be_at_least_two_months_ahead(self):
+        minimum_date = _minimum_activity_start_date(date.today())
+        activity = add_activity(
+            self.database,
+            "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 10,
+            start_date=minimum_date.isoformat(),
+        )
+        self.assertEqual(activity["start_date"], minimum_date.isoformat())
+
+        with self.assertRaisesRegex(ValueError, "dos meses después"):
+            add_activity(
+                self.database,
+                "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 10,
+                start_date=(minimum_date - timedelta(days=1)).isoformat(),
+            )
+
     def test_invalid_capacity_is_rejected(self):
         for capacity in (0, -1, 1.5, True):
             with self.subTest(capacity=capacity):
@@ -903,7 +984,7 @@ class ActivityFunctionsTests(unittest.TestCase):
             "3",  # Wednesday
             "5",  # Friday
             "0",  # finish selecting days
-            "2026-12-01",
+            _minimum_activity_start_date(date.today()).isoformat(),
             "10:00",
             "11:00",
             "12",

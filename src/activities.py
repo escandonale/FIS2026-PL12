@@ -1,3 +1,4 @@
+import calendar
 from datetime import date, time
 from enum import Enum
 from typing import Iterable, TypedDict
@@ -58,7 +59,7 @@ def add_activity(
     parsed_weekdays = _parse_weekdays(weekdays)
     validate_times(start_time, end_time)
     if start_date is not None:
-        _parse_activity_date(start_date)
+        validate_start_date(start_date)
     if type(available_places) is not int or available_places <= 0:
         raise ValueError("El número de plazas debe ser un entero mayor que cero.")
     activity_id = database.executeTransaction(
@@ -368,6 +369,13 @@ def list_activities(database: DataBase) -> list[dict[str, object]]:
     return activities
 
 
+def list_unassigned_activities(database: DataBase) -> list[dict[str, object]]:
+    return [
+        activity for activity in list_activities(database)
+        if activity["installation"] is None
+    ]
+
+
 def get_installations(
     database: DataBase, category: ActivityCategory | str
 ) -> list[Installation]:
@@ -443,6 +451,14 @@ def migrate_activity_installation(database: DataBase) -> None:
                 member_registration_end TEXT,
                 non_member_registration_start TEXT,
                 non_member_registration_end TEXT,
+                CHECK (
+                    start_time GLOB '[01][0-9]:[0-5][0-9]'
+                    OR start_time GLOB '2[0-3]:[0-5][0-9]'
+                ),
+                CHECK (
+                    end_time GLOB '[01][0-9]:[0-5][0-9]'
+                    OR end_time GLOB '2[0-3]:[0-5][0-9]'
+                ),
                 CHECK (end_time > start_time),
                 FOREIGN KEY (category, installation_id)
                     REFERENCES category_installation (category, installation_id)
@@ -508,6 +524,25 @@ def _parse_activity_date(value: str) -> date:
     return parsed_date
 
 
+def _minimum_activity_start_date(created_on: date) -> date:
+    target_month = created_on.month + 2
+    year = created_on.year + (target_month - 1) // 12
+    month = (target_month - 1) % 12 + 1
+    day = min(created_on.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+def validate_start_date(value: str) -> date:
+    parsed_date = _parse_activity_date(value)
+    minimum_date = _minimum_activity_start_date(date.today())
+    if parsed_date < minimum_date:
+        raise ValueError(
+            "La fecha de inicio debe ser al menos dos meses después de la "
+            f"creación ({minimum_date.isoformat()} o posterior)."
+        )
+    return parsed_date
+
+
 def _parse_enum(enum_type: type[Enum], value: Enum | str, field: str):
     try:
         return enum_type(value)
@@ -533,11 +568,19 @@ def validate_times(start_time: str, end_time: str) -> None:
         parsed_start = time.fromisoformat(start_time)
         parsed_end = time.fromisoformat(end_time)
     except (TypeError, ValueError):
-        raise ValueError("Las horas deben tener el formato HH:MM.") from None
+        raise ValueError(
+            "Las horas deben estar entre 00:00 y 23:59 y tener el formato HH:MM."
+        ) from None
 
     if parsed_start.strftime("%H:%M") != start_time:
-        raise ValueError("La hora de inicio debe tener el formato HH:MM.")
+        raise ValueError(
+            "La hora de inicio debe estar entre 00:00 y 23:59 y tener el "
+            "formato HH:MM."
+        )
     if parsed_end.strftime("%H:%M") != end_time:
-        raise ValueError("La hora de fin debe tener el formato HH:MM.")
+        raise ValueError(
+            "La hora de fin debe estar entre 00:00 y 23:59 y tener el "
+            "formato HH:MM."
+        )
     if parsed_end <= parsed_start:
         raise ValueError("La hora de fin debe ser posterior a la hora de inicio.")

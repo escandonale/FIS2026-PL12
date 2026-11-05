@@ -7,6 +7,7 @@ from unittest.mock import patch
 from main import run_menu
 from src.activities import (
     RegistrationsAlreadyOpenError,
+    _minimum_activity_start_date,
     add_activity,
     get_installations,
 )
@@ -36,7 +37,12 @@ class RegistrationDateTests(unittest.TestCase):
             "11:00",
             12,
             installation_id,
+            _minimum_activity_start_date(date.today()).isoformat(),
+        )
+        self.database.executeUpdateQuery(
+            "UPDATE activity SET start_date = ? WHERE id = ?",
             "2026-06-01",
+            self.activity["id"],
         )
 
     def tearDown(self):
@@ -60,7 +66,7 @@ class RegistrationDateTests(unittest.TestCase):
     def test_lists_only_activities_starting_after_today(self):
         installation_id = get_installations(self.database, "Pilates")[0]["id"]
         for start_date in ("2026-05-01", "2026-04-30", None):
-            add_activity(
+            activity = add_activity(
                 self.database,
                 "Pilates",
                 "Medio",
@@ -69,8 +75,13 @@ class RegistrationDateTests(unittest.TestCase):
                 "13:00",
                 10,
                 installation_id,
-                start_date,
             )
+            if start_date is not None:
+                self.database.executeUpdateQuery(
+                    "UPDATE activity SET start_date = ? WHERE id = ?",
+                    start_date,
+                    activity["id"],
+                )
 
         activities = get_actividades_no_iniciadas(self.database, self.today)
 

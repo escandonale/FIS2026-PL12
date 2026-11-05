@@ -3,6 +3,46 @@ DROP TRIGGER IF EXISTS prevent_activity_schedule_conflict_on_day_insert;
 DROP TRIGGER IF EXISTS prevent_activity_schedule_conflict_on_day_update;
 DROP TRIGGER IF EXISTS prevent_activity_schedule_conflict_on_time_update;
 DROP TRIGGER IF EXISTS prevent_activity_schedule_conflict_on_activity_insert;
+DROP TRIGGER IF EXISTS validate_activity_times_on_insert;
+DROP TRIGGER IF EXISTS validate_activity_times_on_update;
+
+CREATE TRIGGER validate_activity_times_on_insert
+BEFORE INSERT ON activity
+WHEN NOT (
+    NEW.start_time IS NOT NULL
+    AND NEW.end_time IS NOT NULL
+    AND (
+        NEW.start_time GLOB '[01][0-9]:[0-5][0-9]'
+        OR NEW.start_time GLOB '2[0-3]:[0-5][0-9]'
+    )
+    AND (
+        NEW.end_time GLOB '[01][0-9]:[0-5][0-9]'
+        OR NEW.end_time GLOB '2[0-3]:[0-5][0-9]'
+    )
+    AND NEW.end_time > NEW.start_time
+)
+BEGIN
+    SELECT RAISE(ABORT, 'invalid_activity_time');
+END;
+
+CREATE TRIGGER validate_activity_times_on_update
+BEFORE UPDATE OF start_time, end_time ON activity
+WHEN NOT (
+    NEW.start_time IS NOT NULL
+    AND NEW.end_time IS NOT NULL
+    AND (
+        NEW.start_time GLOB '[01][0-9]:[0-5][0-9]'
+        OR NEW.start_time GLOB '2[0-3]:[0-5][0-9]'
+    )
+    AND (
+        NEW.end_time GLOB '[01][0-9]:[0-5][0-9]'
+        OR NEW.end_time GLOB '2[0-3]:[0-5][0-9]'
+    )
+    AND NEW.end_time > NEW.start_time
+)
+BEGIN
+    SELECT RAISE(ABORT, 'invalid_activity_time');
+END;
 
 CREATE TRIGGER IF NOT EXISTS prevent_activity_schedule_conflict_on_assignment
 BEFORE UPDATE OF installation_id ON activity

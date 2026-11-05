@@ -9,8 +9,10 @@ from src.activities import (
     get_installations,
     list_installation_conflicts,
     list_activities,
+    list_unassigned_activities,
     migrate_activity_installation,
     validate_times,
+    validate_start_date,
 )
 from src.actividades.actividades_modelo import migrate_cancellation_status
 from src.control_plazas import control_plazas
@@ -98,7 +100,7 @@ def run_menu(database: DataBase) -> None:
 
         if option == "3":
             try:
-                _assign_installation_from_input(database)
+                _assign_installation_from_input(database, require_confirmation=False)
             except ValueError as error:
                 print(error)
             except UnexpectedException as error:
@@ -167,10 +169,18 @@ def create_activity_from_input(database: DataBase) -> dict[str, object]:
     category = _choose_option("Categoría", list(ActivityCategory))
     level = _choose_option("Nivel", list(ActivityLevel))
     weekdays = _choose_weekdays()
-    start_date = input("Fecha de inicio de la actividad (AAAA-MM-DD): ").strip()
-    start_time = input("Hora de inicio (HH:MM): ").strip()
+    while True:
+        start_date = input(
+            "Fecha de inicio de la actividad (AAAA-MM-DD): "
+        ).strip()
+        try:
+            validate_start_date(start_date)
+            break
+        except ValueError as error:
+            print(error)
 
     while True:
+        start_time = input("Hora de inicio (HH:MM): ").strip()
         end_time = input("Hora de fin (HH:MM): ").strip()
         try:
             validate_times(start_time, end_time)
@@ -200,44 +210,55 @@ def create_activity_from_input(database: DataBase) -> dict[str, object]:
     )
 
 
-def _assign_installation_from_input(database: DataBase) -> None:
-    activities = list_activities(database)
+def _assign_installation_from_input(
+    database: DataBase, require_confirmation: bool = True
+) -> None:
+    activities = list_unassigned_activities(database)
     if not activities:
-        print("Todavía no hay actividades disponibles.")
+        print("Todavía no hay actividades pendientes de asignación.")
         return
 
-    print("\nACTIVIDADES DISPONIBLES")
+    print("\nACTIVIDADES SIN ASIGNAR")
     for activity in activities:
         print(
             f"[{activity['id']}] {activity['category']} - "
-            f"{activity['level']} ({activity['installation'] or 'Sin asignar'})"
+            f"{activity['level']} | {', '.join(activity['weekdays'])} | "
+            f"{activity['start_time']}-{activity['end_time']}"
         )
 
-    selection = input("\nIntroduce el ID de la actividad: ").strip()
-    try:
-        activity_id = int(selection)
-    except ValueError:
-        print("Introduce un ID válido.")
-        return
-    activity = next(
-        (item for item in activities if item["id"] == activity_id),
-        None,
-    )
+    selection = input("\nIntroduce el ID o nombre de la actividad: ").strip()
+    activity = _find_activity_by_reference(activities, selection)
     if activity is None:
-        print("No existe una actividad con ese ID.")
+        print("No existe una actividad con ese identificador o nombre.")
         return
+
+    print("\nResumen de la actividad:")
+    print(f"- Actividad: {activity['category']} - {activity['level']}")
+    print(f"- Días: {', '.join(activity['weekdays'])}")
+    print(f"- Horario: {activity['start_time']} - {activity['end_time']}")
+    print(f"- Inicio: {activity['start_date'] or 'Sin asignar'}")
 
     installations = get_installations(database, activity["category"])
     if not installations:
         print("No hay instalaciones compatibles disponibles.")
         return
     installation = _choose_installation(installations)
+
+    print("\nVa a asignar la siguiente instalación:")
+    print(f"- Instalación: {installation['name']}")
+    print(f"- Actividad: {activity['category']} - {activity['level']}")
+    if require_confirmation:
+        answer = input("¿Confirmar asignación? (s/n): ").strip().lower()
+        if answer not in {"s", "si", "sí", "yes", "y"}:
+            print("Operación cancelada.")
+            return
+
     assigned = assign_activity_to_installation(
-        database, activity_id, installation["id"]
+        database, activity["id"], installation["id"]
     )
     print(
         f"Instalación {assigned['installation']} asignada a la actividad "
-        f"{activity_id}."
+        f"{activity['id']}."
     )
 
 
@@ -293,6 +314,36 @@ def _open_registration_period_from_input(database: DataBase) -> None:
             f"Plazo de inscripción abierto para la actividad {period['activity_id']}."
         )
         return
+
+
+def _find_activity_by_reference(
+    activities: list[dict[str, object]], selection: str
+) -> dict[str, object] | None:
+    if not selection:
+        return None
+
+    try:
+        activity_id = int(selection)
+    except ValueError:
+        activity_id = None
+
+    normalized_selection = selection.strip().lower()
+    for activity in activities:
+        activity_name = (
+            f"{activity['category']} {activity['level']}"
+        ).lower()
+        category_name = str(activity["category"]).lower()
+        level_name = str(activity["level"]).lower()
+        if activity_id is not None and activity["id"] == activity_id:
+            return activity
+        if normalized_selection in {activity_name, category_name, level_name}:
+            return activity
+        if normalized_selection in {
+            f"{activity['category']} - {activity['level']}",
+            f"{activity['category']} {activity['level']}",
+        }:
+            return activity
+    return None
 
 
 def _choose_option(
