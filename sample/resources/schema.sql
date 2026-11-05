@@ -51,3 +51,15 @@ CREATE TABLE Inscripciones (
     FOREIGN KEY (id_socio) REFERENCES Socios(id),
     FOREIGN KEY (id_actividad) REFERENCES Actividades(id)
 );
+
+CREATE TABLE IF NOT EXISTS no_socio (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,
+    apellidos TEXT NOT NULL,
+    fecha_nacimiento TEXT NOT NULL,
+    genero TEXT NOT NULL,
+    direccion TEXT NOT NULL,
+    dni TEXT NOT NULL UNIQUE,
+    correo TEXT NOT NULL,
+    fecha_registro TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
