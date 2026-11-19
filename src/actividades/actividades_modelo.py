@@ -278,7 +278,7 @@ def _crear_inscripcion(
     if activity["occupied_places"] < activity["available_places"]:
         state = "confirmado"
 
-    connection.execute(
+    cursor = connection.execute(
         """
         INSERT INTO inscripcion (
             activity_id, nombre, apellidos, dni, estado, es_socio
@@ -286,6 +286,9 @@ def _crear_inscripcion(
         """,
         (activity_id, nombre, apellidos, dni, state, int(es_socio)),
     )
+    inscripcion_id = cursor.lastrowid
+
+    posicion_lista_espera: int | None = None
     if state == "confirmado":
         result = connection.execute(
             """
@@ -299,6 +302,21 @@ def _crear_inscripcion(
             raise sqlite3.DatabaseError(
                 "No se pudo actualizar la ocupación de la actividad."
             )
+    else:
+        waiting_list = connection.execute(
+            """
+            SELECT id
+            FROM inscripcion
+            WHERE activity_id = ? AND estado = 'lista de espera'
+            ORDER BY es_socio DESC, fecha_inscripcion ASC, id ASC
+            """,
+            (activity_id,),
+        ).fetchall()
+        posicion_lista_espera = next(
+            index
+            for index, row in enumerate(waiting_list, start=1)
+            if row["id"] == inscripcion_id
+        )
 
     weekdays = connection.execute(
         """
@@ -327,6 +345,7 @@ def _crear_inscripcion(
             f"{activity['start_time']}-{activity['end_time']}"
         ),
         "estado": state,
+        "posicion_lista_espera": posicion_lista_espera,
     }
 
 

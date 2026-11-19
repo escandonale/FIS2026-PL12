@@ -60,6 +60,10 @@ def iniciar_inscripcion(db_path: str | Path = DATABASE) -> None:
         print(f"Actividad: {receipt['actividad']} ({receipt['nivel']})")
         print(f"Horario: {receipt['periodicidad']}")
         print(f"ESTADO: {receipt['estado'].upper()}")
+        if receipt.get("posicion_lista_espera") is not None:
+            print(
+                f"Posición en lista de espera: {receipt['posicion_lista_espera']}"
+            )
         print("-----------------------------------")
     except ValueError as error:
         print(f"\nERROR: {error}")
