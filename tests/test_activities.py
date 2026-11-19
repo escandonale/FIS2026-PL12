@@ -1583,6 +1583,35 @@ class ActivityFunctionsTests(unittest.TestCase):
         )
         self.assertEqual(installation_column["notnull"], 0)
 
+    def test_waiting_list_position_prioritizes_members_over_non_members(self):
+        activity = add_activity(
+            self.database, "Pilates", "Medio", ["Lunes"], "10:00", "11:00", 1
+        )
+        self._open_member_registration_period(activity["id"])
+        set_activity_occupancy(self.database, activity["id"], 1)
+
+        self.database.executeUpdateQuery(
+            """
+            INSERT INTO inscripcion (
+                activity_id, nombre, apellidos, dni, estado, es_socio
+            ) VALUES (?, 'Luis', 'Pérez', '99999999Z', 'lista de espera', 0)
+            """,
+            activity["id"],
+        )
+        self.database.executeUpdateQuery(
+            """
+            INSERT INTO Socios (
+                dni, nombre, apellidos, numero_socio, direccion
+            ) VALUES ('12345678A', 'Ana', 'García', 'S001', 'Calle Mayor 1')
+            """
+        )
+
+        receipt = inscribir_socio(
+            "12345678A", activity["id"], self.database.dbname
+        )
+
+        self.assertEqual(receipt["estado"], "lista de espera")
+        self.assertEqual(receipt["posicion_lista_espera"], 1)
 
 if __name__ == "__main__":
     unittest.main()

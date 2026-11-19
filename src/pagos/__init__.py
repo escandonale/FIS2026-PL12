@@ -1,0 +1,1 @@
+"""Gestión de recibos e importación de ficheros bancarios."""
