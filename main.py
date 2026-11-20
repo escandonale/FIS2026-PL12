@@ -22,6 +22,7 @@ from src.control_plazas import control_plazas
 from src.config import CONSTRAINTS, DATA, DATABASE, SCHEMA
 from src.actividades.actividades_vista import iniciar_cancelacion, iniciar_inscripcion
 from src.asistencia import iniciar_registro_asistencia
+from src.informe_demanda import iniciar_informe_demanda
 from src.fechas_inscripcion import (
     configurar_inscripciones,
     migrate_registration_dates,
@@ -92,6 +93,7 @@ def run_menu(database: DataBase) -> None:
         print("8. Registrar nuevo usuario (no socio)")
         print("9. Registrar nuevo socio")
         print("10. Registrar asistencia")
+        print("11. Comparar demanda de actividades")
 
         print("0. Salir")
         option = input("Selecciona una opción: ").strip()
@@ -181,8 +183,18 @@ def run_menu(database: DataBase) -> None:
             except UnexpectedException as error:
                 print(f"Error al acceder a la base de datos: {error}")
             continue
+        if option == "11":
+            try:
+                iniciar_informe_demanda(database)
+            except ValueError as error:
+                print(f"No se pudo generar el informe: {error}")
+            except UnexpectedException as error:
+                print(f"Error al acceder a la base de datos: {error}")
+            continue
 
-        print("Opción no válida. Elige 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 o 0.")
+        print(
+            "Opción no válida. Elige 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 o 0."
+        )
 
 
 def display_activities(activities: list[dict[str, object]]) -> None:
