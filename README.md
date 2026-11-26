@@ -9,9 +9,7 @@ Acceso al modelo de datos: https://dbdiagram.io/d/modelo-SisRec-68e3f5f2d2b621e4
 IMPORTAR Y EXPORTAR ENVIROMENT\
 importar enviroment: pip install -r requirements.txt\
 exportar enviroment: pip freeze > requirements.txt\
-Librerías incluidas en el enviroment:
-
-[...]
+La aplicación utiliza `prettytable` para presentar los datos en tablas.
 
 
 ESTRUCTURA DEL PROYECTO
@@ -56,8 +54,17 @@ actividades.
 El menú permite asignar instalaciones (opción 3), gestionar globalmente los
 plazos globales de inscripción para socios y no socios (opción 4), inscribir
 personas (opción 5), consultar ocupación e inscripciones (opción 6) y cancelar
-una inscripción (opción 7). Los plazos se guardan en la oferta y se replican en
-las actividades para compatibilidad con los datos anteriores; cada cierre debe
+una inscripción (opción 7). La opción 11 muestra la ocupación semanal de un
+espacio para la franja seleccionada (mañana, mediodía o tarde), con una cuadrícula
+de actividades y disponibilidad, porcentajes por hora y día, y los picos de
+ocupación. El registro de asistencia (opción 10) se guarda por sesión y permite
+corregir un pase de lista. La opción 12 compara plazas planificadas y asistencia
+real por semana y espacio; permite revisar semanas anteriores y ver una gráfica
+de evolución por actividad. La semana actual es la predeterminada y se puede
+retroceder con la opción `A`. La asistencia real solo se conserva desde que se
+empieza a guardar cada pase de lista; los registros anteriores no se pueden
+reconstruir automáticamente. Los plazos se guardan en la oferta y se replican
+en las actividades para compatibilidad con los datos anteriores; cada cierre debe
 ser anterior al inicio de todas las actividades. El gestor puede programar
 fechas, abrir ahora o cerrar ahora
 el plazo de cada grupo; la programación y los cambios inmediatos se aplican
@@ -95,9 +102,14 @@ ESTADO DE LAS HISTORIAS DE USUARIO
   Implementado en la vista de control de plazas.
 - Como gestor de actividades quiero asignar la actividad a un espacio para su
   posterior inscripción. Implementado con la asignación de instalaciones compatibles.
+- Como responsable de actividades quiero consultar la ocupación por espacio y
+  franja horaria para identificar las franjas más ocupadas. Implementado en el
+  informe semanal de ocupación.
 - Como gestor de actividades quiero rellenar un registro de asistencia para poder
-  generar información. Se calculan y muestran los datos, pero el registro todavía
-  no se guarda en la base de datos.
+  generar información. Se guarda la asistencia de cada sesión en la base de datos.
+- Como gestor de actividades quiero comparar la ocupación planificada con la real
+  para detectar desajustes en el uso de las instalaciones. Implementado con
+  comparación semanal y gráfica de evolución por actividad.
 
 La funcionalidad de registro de personas queda cubierta para ambos perfiles del
 sistema. En ambos registros se solicita el género como `m`, `f` o `n`; el formulario

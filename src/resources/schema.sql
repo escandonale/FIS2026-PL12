@@ -162,3 +162,23 @@ CREATE TABLE IF NOT EXISTS inscripcion (
         CHECK (es_socio IN (0, 1)),
     FOREIGN KEY (activity_id) REFERENCES activity (id)
 );
+
+CREATE TABLE IF NOT EXISTS attendance_session (
+    activity_id INTEGER NOT NULL,
+    session_date TEXT NOT NULL,
+    planned_count INTEGER NOT NULL CHECK (planned_count >= 0),
+    PRIMARY KEY (activity_id, session_date),
+    FOREIGN KEY (activity_id) REFERENCES activity (id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS attendance_record (
+    activity_id INTEGER NOT NULL,
+    session_date TEXT NOT NULL,
+    registration_id INTEGER NOT NULL,
+    attended INTEGER NOT NULL CHECK (attended IN (0, 1)),
+    PRIMARY KEY (activity_id, session_date, registration_id),
+    FOREIGN KEY (activity_id, session_date)
+        REFERENCES attendance_session (activity_id, session_date)
+        ON DELETE CASCADE,
+    FOREIGN KEY (registration_id) REFERENCES inscripcion (id) ON DELETE CASCADE
+);

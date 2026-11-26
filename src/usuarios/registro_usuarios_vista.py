@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from src.config import DATABASE
+from src.util.pretty_tables import print_table
 
 from .registrar_usuarios import registrar_no_socio, registrar_socio
 
@@ -28,13 +29,12 @@ def iniciar_registro_socio(db_path: str | Path = DATABASE) -> None:
             direccion,
             db_path,
         )
-        print("\nREGISTRO DE SOCIO COMPLETADO CON ÉXITO")
-        print("--- JUSTIFICANTE DE ALTA ---")
-        print(f"Nombre: {nombre} {apellidos}")
-        print(f"Género: {genero}")
-        print(f"DNI: {dni_registrado}")
-        print(f"Número de socio: {numero_socio}")
-        print("----------------------------")
+        print("REGISTRO DE SOCIO COMPLETADO CON ÉXITO")
+        print_table(
+            "JUSTIFICANTE DE ALTA",
+            ["Nombre", "Género", "DNI", "Número de socio"],
+            [[f"{nombre} {apellidos}", genero, dni_registrado, numero_socio]],
+        )
         print("Ya puedes inscribirte con prioridad en las actividades.")
     except ValueError as error:
         print(f"\nERROR: {error}")
@@ -67,13 +67,12 @@ def iniciar_registro_no_socio(db_path: str | Path = DATABASE) -> None:
             db_path,
         )
 
-        print("\nREGISTRO COMPLETADO CON ÉXITO")
-        print("--- JUSTIFICANTE DE ALTA ---")
-        print(f"Nombre: {nombre} {apellidos}")
-        print(f"Género: {genero}")
-        print(f"DNI: {dni}")
-        print(f"Fecha de registro: {fecha_alta}")
-        print("----------------------------")
+        print("REGISTRO COMPLETADO CON ÉXITO")
+        print_table(
+            "JUSTIFICANTE DE ALTA",
+            ["Nombre", "Género", "DNI", "Fecha de registro"],
+            [[f"{nombre} {apellidos}", genero, dni, fecha_alta]],
+        )
         print("Tus datos han sido guardados para agilizar futuras inscripciones.")
     except ValueError as error:
         print(f"\nERROR: {error}")

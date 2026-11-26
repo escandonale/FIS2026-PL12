@@ -22,11 +22,14 @@ from src.control_plazas import control_plazas
 from src.config import CONSTRAINTS, DATA, DATABASE, SCHEMA
 from src.actividades.actividades_vista import iniciar_cancelacion, iniciar_inscripcion
 from src.asistencia import iniciar_registro_asistencia
+from src.ocupacion_instalaciones import iniciar_consulta_ocupacion
+from src.comparacion_ocupacion import iniciar_consulta_ocupacion_real
 from src.fechas_inscripcion import (
     configurar_inscripciones,
     migrate_registration_dates,
 )
 from src.util.database import DataBase
+from src.util.pretty_tables import print_table
 from src.util.unexpectedException import UnexpectedException
 
 
@@ -57,7 +60,6 @@ def main() -> None:
 def run_menu(database: DataBase) -> None:
     while True:
         conflicts = list_installation_conflicts(database)
-        print("\nCENTRO DEPORTIVO")
         registration_state = database.executeQuery(
             """
             SELECT member_registration_status, non_member_registration_status
@@ -77,23 +79,28 @@ def run_menu(database: DataBase) -> None:
                 else "PROGRAMADAS"
             )
         )
-        print(f"Inscripciones: {state_label}")
+        print_table("CENTRO DEPORTIVO", ["Inscripciones"], [[state_label]])
+        menu_options = [] if conflicts else [["1", "Añadir actividad"]]
         if conflicts:
             display_existing_conflicts(database, conflicts)
             print("Las altas están bloqueadas hasta resolver los solapamientos.")
-        else:
-            print("1. Añadir actividad")
-        print("2. Ver actividades")
-        print("3. Asignar instalación")
-        print("4. Gestionar inscripciones globales")
-        print("5. Inscribir persona")
-        print("6. Controlar plazas e inscripciones")
-        print("7. Cancelar inscripción")
-        print("8. Registrar nuevo usuario (no socio)")
-        print("9. Registrar nuevo socio")
-        print("10. Registrar asistencia")
-
-        print("0. Salir")
+        menu_options.extend(
+            [
+                ["2", "Ver actividades"],
+                ["3", "Asignar instalación"],
+                ["4", "Gestionar inscripciones globales"],
+                ["5", "Inscribir persona"],
+                ["6", "Controlar plazas e inscripciones"],
+                ["7", "Cancelar inscripción"],
+                ["8", "Registrar nuevo usuario (no socio)"],
+                ["9", "Registrar nuevo socio"],
+                ["10", "Registrar asistencia"],
+                ["11", "Consultar ocupación por espacio"],
+                ["12", "Comparar ocupación planificada y real"],
+                ["0", "Salir"],
+            ]
+        )
+        print_table("MENÚ PRINCIPAL", ["Opción", "Acción"], menu_options)
         option = input("Selecciona una opción: ").strip()
 
         if option == "0":
@@ -107,17 +114,21 @@ def run_menu(database: DataBase) -> None:
                 activity = create_activity_from_input(database)
                 if activity is None:
                     continue
-                print("\nActividad añadida correctamente:")
-                print(f"Categoría: {activity['category']}")
-                print(f"Nivel: {activity['level']}")
                 installation = activity["installation"] or "Pendiente de asignación"
-                print(f"Instalación: {installation}")
-                print(f"Días: {', '.join(activity['weekdays'])}")
-                print(
-                    f"Horario: {activity['start_time']} - {activity['end_time']}"
+                print_table(
+                    "Actividad añadida correctamente",
+                    ["Categoría", "Nivel", "Instalación", "Días", "Horario",
+                     "Capacidad", "Ocupación"],
+                    [[
+                        activity["category"],
+                        activity["level"],
+                        installation,
+                        ", ".join(activity["weekdays"]),
+                        f"{activity['start_time']} - {activity['end_time']}",
+                        f"{activity['available_places']} plazas",
+                        "0% (0 plazas)",
+                    ]],
                 )
-                print(f"Capacidad total: {activity['available_places']} plazas")
-                print("Ocupación: 0% (0 plazas)")
             except ValueError as error:
                 print(f"Datos no válidos: {error}")
             except RegistrationsAlreadyOpenError as error:
@@ -178,28 +189,53 @@ def run_menu(database: DataBase) -> None:
         if option == "10":
             try:
                 iniciar_registro_asistencia(database)
+            except ValueError as error:
+                print(f"Datos no válidos: {error}")
+            except UnexpectedException as error:
+                print(f"Error al acceder a la base de datos: {error}")
+            continue
+        if option == "11":
+            try:
+                iniciar_consulta_ocupacion(database)
+            except ValueError as error:
+                print(f"Datos no válidos: {error}")
+            except UnexpectedException as error:
+                print(f"Error al acceder a la base de datos: {error}")
+            continue
+        if option == "12":
+            try:
+                iniciar_consulta_ocupacion_real(database)
+            except ValueError as error:
+                print(f"Datos no válidos: {error}")
             except UnexpectedException as error:
                 print(f"Error al acceder a la base de datos: {error}")
             continue
 
-        print("Opción no válida. Elige 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 o 0.")
+        print(
+            "Opción no válida. Elige 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 o 0."
+        )
 
 
 def display_activities(activities: list[dict[str, object]]) -> None:
-    print("\nACTIVIDADES DISPONIBLES")
-    for activity in activities:
-        print(f"\nActividad {activity['id']}")
-        print(f"Categoría: {activity['category']}")
-        print(f"Nivel: {activity['level']}")
-        print(f"Instalación: {activity['installation'] or 'Sin asignar'}")
-        print(f"Días: {', '.join(activity['weekdays'])}")
-        print(f"Fecha de inicio: {activity['start_date'] or 'Sin asignar'}")
-        print(f"Horario: {activity['start_time']} - {activity['end_time']}")
-        print(
-            f"Ocupación: {activity['occupied_places']}/"
-            f"{activity['available_places']} plazas "
-            f"({activity['occupancy_percentage']}%)"
-        )
+    print_table(
+        "ACTIVIDADES DISPONIBLES",
+        ["ID", "Categoría", "Nivel", "Instalación", "Días", "Inicio",
+         "Horario", "Ocupación"],
+        [
+            [
+                activity["id"],
+                activity["category"],
+                activity["level"],
+                activity["installation"] or "Sin asignar",
+                ", ".join(activity["weekdays"]),
+                activity["start_date"] or "Sin asignar",
+                f"{activity['start_time']} - {activity['end_time']}",
+                f"{activity['occupied_places']}/{activity['available_places']} "
+                f"({activity['occupancy_percentage']}%)",
+            ]
+            for activity in activities
+        ],
+    )
 
 
 def display_existing_conflicts(
@@ -210,15 +246,22 @@ def display_existing_conflicts(
     if not conflicts:
         return
 
-    print("\nAVISO: Se han encontrado solapamientos ya existentes:")
-    for conflict in conflicts:
-        print(
-            f"- Actividades {conflict['first_activity_id']} y "
-            f"{conflict['second_activity_id']} en {conflict['installation']}, "
-            f"{conflict['weekday']}: "
-            f"{conflict['first_start_time']}-{conflict['first_end_time']} y "
-            f"{conflict['second_start_time']}-{conflict['second_end_time']}."
-        )
+    print_table(
+        "SOLAPAMIENTOS EXISTENTES",
+        ["Actividad 1", "Horario 1", "Actividad 2", "Horario 2", "Instalación",
+         "Día"],
+        [
+            [
+                conflict["first_activity_id"],
+                f"{conflict['first_start_time']}-{conflict['first_end_time']}",
+                conflict["second_activity_id"],
+                f"{conflict['second_start_time']}-{conflict['second_end_time']}",
+                conflict["installation"],
+                conflict["weekday"],
+            ]
+            for conflict in conflicts
+        ],
+    )
     print("Usa «Asignar instalación a una actividad» para resolverlos.")
 
 
@@ -255,14 +298,20 @@ def create_activity_from_input(database: DataBase) -> dict[str, object] | None:
         except ValueError:
             print("El número de plazas debe ser un entero mayor que cero.")
 
-    print("\nResumen de la actividad:")
-    print(f"- Categoría: {category.value}")
-    print(f"- Nivel: {level.value}")
-    print(f"- Días: {', '.join(day.value for day in weekdays)}")
-    print(f"- Fecha de inicio: {start_date}")
-    print(f"- Horario: {start_time} - {end_time}")
-    print(f"- Plazas: {available_places}")
-    print("- Instalación: Sin asignar")
+    print_table(
+        "RESUMEN DE LA ACTIVIDAD",
+        ["Categoría", "Nivel", "Días", "Fecha de inicio", "Horario", "Plazas",
+         "Instalación"],
+        [[
+            category.value,
+            level.value,
+            ", ".join(day.value for day in weekdays),
+            start_date,
+            f"{start_time} - {end_time}",
+            available_places,
+            "Sin asignar",
+        ]],
+    )
     answer = input("¿Guardar la actividad? (s/n): ").strip().lower()
     if answer not in {"s", "si", "sí"}:
         print("Creación cancelada.")
@@ -286,13 +335,20 @@ def _assign_installation_from_input(database: DataBase) -> None:
         print("Todavía no hay actividades pendientes de asignación.")
         return
 
-    print("\nACTIVIDADES SIN ASIGNAR")
-    for activity in activities:
-        print(
-            f"[{activity['id']}] {activity['category']} - "
-            f"{activity['level']} | {', '.join(activity['weekdays'])} | "
-            f"{activity['start_time']}-{activity['end_time']}"
-        )
+    print_table(
+        "ACTIVIDADES SIN ASIGNAR",
+        ["ID", "Categoría", "Nivel", "Días", "Horario"],
+        [
+            [
+                activity["id"],
+                activity["category"],
+                activity["level"],
+                ", ".join(activity["weekdays"]),
+                f"{activity['start_time']}-{activity['end_time']}",
+            ]
+            for activity in activities
+        ],
+    )
 
     selection = input("\nIntroduce el ID o nombre de la actividad: ").strip()
     activity = _find_activity_by_reference(activities, selection)
@@ -306,18 +362,22 @@ def _assign_installation_from_input(database: DataBase) -> None:
         return
     installation = _choose_installation(installations)
 
-    print("\nResumen de la asignación:")
-    print(f"- ID: {activity['id']}")
-    print(f"- Actividad: {activity['category']} - {activity['level']}")
-    print(f"- Días: {', '.join(activity['weekdays'])}")
-    print(f"- Fecha de inicio: {activity['start_date'] or 'Sin asignar'}")
-    print(f"- Horario: {activity['start_time']} - {activity['end_time']}")
-    print(f"- Plazas: {activity['available_places']}")
-    print(
-        f"- Ocupación: {activity['occupied_places']}/"
-        f"{activity['available_places']} ({activity['occupancy_percentage']}%)"
+    print_table(
+        "RESUMEN DE LA ASIGNACIÓN",
+        ["ID", "Actividad", "Días", "Fecha de inicio", "Horario", "Plazas",
+         "Ocupación", "Espacio"],
+        [[
+            activity["id"],
+            f"{activity['category']} - {activity['level']}",
+            ", ".join(activity["weekdays"]),
+            activity["start_date"] or "Sin asignar",
+            f"{activity['start_time']} - {activity['end_time']}",
+            activity["available_places"],
+            f"{activity['occupied_places']}/{activity['available_places']} "
+            f"({activity['occupancy_percentage']}%)",
+            installation["name"],
+        ]],
     )
-    print(f"- Espacio: {installation['name']}")
     answer = input("¿Guardar la asignación? (s/n): ").strip().lower()
     if answer not in {"s", "si", "sí"}:
         print("Operación cancelada.")
@@ -326,19 +386,25 @@ def _assign_installation_from_input(database: DataBase) -> None:
     assigned = assign_activity_to_installation(
         database, activity["id"], installation["id"]
     )
-    print(
-        f"Instalación {assigned['installation']} asignada a la actividad "
-        f"{activity['id']}."
+    print_table(
+        "Instalación asignada",
+        ["Actividad", "Instalación"],
+        [[activity["id"], assigned["installation"]]],
     )
 
 
 def _open_registration_period_from_input(database: DataBase) -> None:
-    print("\nGESTIÓN GLOBAL DE INSCRIPCIONES")
     print("Elige una acción para socios y otra para no socios.")
-    print("1. Programar apertura y cierre")
-    print("2. Abrir ahora")
-    print("3. Cerrar ahora")
-    print("4. No cambiar")
+    print_table(
+        "GESTIÓN GLOBAL DE INSCRIPCIONES",
+        ["Opción", "Acción"],
+        [
+            ["1", "Programar apertura y cierre"],
+            ["2", "Abrir ahora"],
+            ["3", "Cerrar ahora"],
+            ["4", "No cambiar"],
+        ],
+    )
     member_action = _choose_registration_action("socios")
     non_member_action = _choose_registration_action("no socios")
 
@@ -363,7 +429,7 @@ def _open_registration_period_from_input(database: DataBase) -> None:
         print(f"Datos no válidos: {error}")
         return
 
-    print("\nEstado global de inscripción actualizado:")
+    registration_rows = []
     for group, status_key, start_key, end_key in (
         (
             "Socios",
@@ -379,14 +445,18 @@ def _open_registration_period_from_input(database: DataBase) -> None:
         ),
     ):
         status = result[status_key]
-        if status == "scheduled":
-            print(
-                f"- {group}: {status} "
-                f"({result[start_key] or 'sin inicio programado'} - "
-                f"{result[end_key] or 'sin cierre programado'})"
-            )
-        else:
-            print(f"- {group}: {status}")
+        period = (
+            f"{result[start_key] or 'sin inicio programado'} - "
+            f"{result[end_key] or 'sin cierre programado'}"
+            if status == "scheduled"
+            else "-"
+        )
+        registration_rows.append([group, status, period])
+    print_table(
+        "ESTADO GLOBAL DE INSCRIPCIÓN ACTUALIZADO",
+        ["Grupo", "Estado", "Periodo"],
+        registration_rows,
+    )
     print("El cambio se aplica simultáneamente a todas las actividades.")
 
 
@@ -473,9 +543,11 @@ def _find_activity_by_reference(
 def _choose_option(
     title: str, options: list[ActivityCategory | ActivityLevel]
 ) -> ActivityCategory | ActivityLevel:
-    print(f"\n{title}:")
-    for index, option in enumerate(options, start=1):
-        print(f"{index}. {option.value}")
+    print_table(
+        title.upper(),
+        ["Opción", "Valor"],
+        [[index, option.value] for index, option in enumerate(options, start=1)],
+    )
 
     while True:
         selection = input("Selecciona una opción: ").strip()
@@ -492,14 +564,18 @@ def _choose_weekdays() -> list[Weekday]:
     weekdays = list(Weekday)
     selected = []
     while True:
-        print("\nDías seleccionados: " + (
-            ", ".join(weekday.value for weekday in selected) if selected else "ninguno"
-        ))
+        print_table(
+            "DÍAS SELECCIONADOS",
+            ["Día"],
+            [[weekday.value] for weekday in selected] or [["Ninguno"]],
+        )
         print("Selecciona un día para añadirlo o 0 para terminar:")
-        for index, weekday in enumerate(weekdays, start=1):
-            marker = " (añadido)" if weekday in selected else ""
-            print(f"{index}. {weekday.value}{marker}")
-        print("0. Terminar selección")
+        weekday_options = [
+            [index, weekday.value, "Añadido" if weekday in selected else ""]
+            for index, weekday in enumerate(weekdays, start=1)
+        ]
+        weekday_options.append([0, "Terminar selección", ""])
+        print_table("DÍAS DISPONIBLES", ["Opción", "Día", "Estado"], weekday_options)
 
         selection = input("Día: ").strip()
         try:
@@ -524,9 +600,14 @@ def _choose_weekdays() -> list[Weekday]:
 def _choose_installation(installations: list[Installation]) -> Installation:
     if not installations:
         raise ValueError("No hay instalaciones compatibles disponibles.")
-    print("\nInstalaciones disponibles para esta categoría:")
-    for index, installation in enumerate(installations, start=1):
-        print(f"{index}. {installation['name']}")
+    print_table(
+        "INSTALACIONES DISPONIBLES",
+        ["Opción", "Instalación"],
+        [
+            [index, installation["name"]]
+            for index, installation in enumerate(installations, start=1)
+        ],
+    )
 
     while True:
         selection = input("Selecciona una instalación: ").strip()

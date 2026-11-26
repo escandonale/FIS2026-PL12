@@ -5,6 +5,7 @@ from src.actividades.actividades_modelo import migrate_cancellation_status
 from src.config import DATABASE, SCHEMA
 from src.fechas_inscripcion import migrate_registration_dates
 from src.util.database import DataBase
+from src.util.pretty_tables import print_table
 from src.util.unexpectedException import UnexpectedException
 
 
@@ -70,12 +71,19 @@ def control_plazas(database: DataBase | None = None) -> None:
         print("Todavía no hay actividades disponibles.")
         return
 
-    print("\nACTIVIDADES DISPONIBLES")
-    for activity in activities:
-        print(
-            f"[{activity['id']}] {activity['category']} - "
-            f"{activity['level']} ({activity['installation']})"
-        )
+    print_table(
+        "ACTIVIDADES DISPONIBLES",
+        ["ID", "Categoría", "Nivel", "Instalación"],
+        [
+            [
+                activity["id"],
+                activity["category"],
+                activity["level"],
+                activity["installation"] or "Sin asignar",
+            ]
+            for activity in activities
+        ],
+    )
 
     while True:
         selection = input("\nIntroduce el ID de la actividad: ").strip()
@@ -91,32 +99,42 @@ def control_plazas(database: DataBase | None = None) -> None:
             continue
         break
 
-    print("\nOCUPACIÓN DE LA ACTIVIDAD")
-    print(f"Instalación: {report['installation'] or 'Sin asignar'}")
-    print(f"Aforo máximo: {report['aforo_max']}")
-    print(f"Plazas ocupadas: {report['plazas_ocupadas']}")
-    print(f"Plazas libres: {report['plazas_libres']}")
+    print_table(
+        "OCUPACIÓN DE LA ACTIVIDAD",
+        ["Instalación", "Aforo máximo", "Plazas ocupadas", "Plazas libres"],
+        [[
+            report["installation"] or "Sin asignar",
+            report["aforo_max"],
+            report["plazas_ocupadas"],
+            report["plazas_libres"],
+        ]],
+    )
 
-    print("\nPERSONAS INSCRITAS")
     registrations = report["inscripciones"]
     if not registrations:
         print("No hay personas inscritas en esta actividad.")
         return
 
-    print("Nombre | Apellidos | Socio | Fecha de inscripción | Estado")
-    for registration in registrations:
-        member = "Sí" if registration["es_socio"] else "No"
-        status = (
-            "Inscrito"
-            if registration["estado"] == "confirmado"
-            else (
-                "Lista de espera"
-                if registration["estado"] == "lista de espera"
-                else "Cancelada"
-            )
-        )
-        print(
-            f"{registration['nombre']} | {registration['apellidos']} | "
-            f"{member} | {registration['fecha_inscripcion']} | {status}"
-        )
+    print_table(
+        "PERSONAS INSCRITAS",
+        ["Nombre", "Apellidos", "Socio", "Fecha de inscripción", "Estado"],
+        [
+            [
+                registration["nombre"],
+                registration["apellidos"],
+                "Sí" if registration["es_socio"] else "No",
+                registration["fecha_inscripcion"],
+                (
+                    "Inscrito"
+                    if registration["estado"] == "confirmado"
+                    else (
+                        "Lista de espera"
+                        if registration["estado"] == "lista de espera"
+                        else "Cancelada"
+                    )
+                ),
+            ]
+            for registration in registrations
+        ],
+    )
 

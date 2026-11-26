@@ -2,6 +2,7 @@ import sqlite3
 from pathlib import Path
 
 from src.config import DATABASE
+from src.util.pretty_tables import print_table
 from .actividades_modelo import (
     cancelar_inscripcion,
     get_actividades_disponibles,
@@ -33,14 +34,20 @@ def iniciar_inscripcion(db_path: str | Path = DATABASE) -> None:
             name = input("Introduce el nombre: ").strip()
             surname = input("Introduce los apellidos: ").strip()
 
-        print("\nActividades disponibles:")
-        for activity in activities:
-            print(
-                f"[{activity['id']}] {activity['nombre']} "
-                f"({activity['modalidad']} - {activity['nivel']}) | "
-                f"{activity['periodicidad']} | Plazas libres: "
-                f"{activity['plazas_libres']}"
-            )
+        print_table(
+            "ACTIVIDADES DISPONIBLES",
+            ["ID", "Actividad", "Nivel", "Horario", "Plazas libres"],
+            [
+                [
+                    activity["id"],
+                    activity["nombre"],
+                    activity["nivel"],
+                    activity["periodicidad"],
+                    activity["plazas_libres"],
+                ]
+                for activity in activities
+            ],
+        )
 
         selection = input("\nIntroduce el ID de la actividad: ").strip()
         try:
@@ -55,12 +62,17 @@ def iniciar_inscripcion(db_path: str | Path = DATABASE) -> None:
             receipt = inscribir_no_socio(
                 dni, name, surname, activity_id, db_path
             )
-        print("\n--- JUSTIFICANTE DE INSCRIPCIÓN ---")
-        print(f"Persona: {receipt['nombre']}")
-        print(f"Actividad: {receipt['actividad']} ({receipt['nivel']})")
-        print(f"Horario: {receipt['periodicidad']}")
-        print(f"ESTADO: {receipt['estado'].upper()}")
-        print("-----------------------------------")
+        print_table(
+            "JUSTIFICANTE DE INSCRIPCIÓN",
+            ["Persona", "Actividad", "Nivel", "Horario", "Estado"],
+            [[
+                receipt["nombre"],
+                receipt["actividad"],
+                receipt["nivel"],
+                receipt["periodicidad"],
+                receipt["estado"].upper(),
+            ]],
+        )
     except ValueError as error:
         print(f"\nERROR: {error}")
     except sqlite3.Error as error:
@@ -78,13 +90,19 @@ def iniciar_cancelacion(db_path: str | Path = DATABASE) -> None:
             )
             return
 
-        print("\nInscripciones que puedes cancelar:")
-        for activity in activities:
-            print(
-                f"[{activity['id']}] {activity['nombre']} | "
-                f"Estado: {activity['estado']} | "
-                f"Fecha límite: {activity['fecha_limite_cancelacion']}"
-            )
+        print_table(
+            "INSCRIPCIONES QUE PUEDES CANCELAR",
+            ["ID", "Actividad", "Estado", "Fecha límite"],
+            [
+                [
+                    activity["id"],
+                    activity["nombre"],
+                    activity["estado"],
+                    activity["fecha_limite_cancelacion"],
+                ]
+                for activity in activities
+            ],
+        )
 
         selection = input(
             "\nIntroduce el ID de la actividad a cancelar (o 'salir'): "

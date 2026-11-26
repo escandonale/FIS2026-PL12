@@ -306,7 +306,8 @@ class ActivityFunctionsTests(unittest.TestCase):
             " ".join(str(argument) for argument in call.args)
             for call in print_mock.call_args_list
         )
-        self.assertIn("Espacio: Gimnasio", printed_text)
+        self.assertIn("Espacio", printed_text)
+        self.assertIn("Gimnasio", printed_text)
 
     def test_activity_occupancy_cannot_exceed_capacity(self):
         activity = add_activity(
@@ -972,10 +973,12 @@ class ActivityFunctionsTests(unittest.TestCase):
         self.assertEqual(conflicts[0]["weekday"], "Jueves")
         self.assertEqual(conflicts[0]["first_start_time"], "18:00")
         self.assertEqual(conflicts[0]["second_start_time"], "19:00")
-        self.assertIn(
-            "18:00-20:00 y 19:00-21:00",
-            str(print_mock.call_args_list),
+        printed_text = "\n".join(
+            " ".join(str(argument) for argument in call.args)
+            for call in print_mock.call_args_list
         )
+        self.assertIn("18:00-20:00", printed_text)
+        self.assertIn("19:00-21:00", printed_text)
 
     def test_existing_conflict_blocks_new_activity_until_resolved(self):
         first_activity = add_activity(
@@ -1455,10 +1458,11 @@ class ActivityFunctionsTests(unittest.TestCase):
             " ".join(str(argument) for argument in call.args)
             for call in print_mock.call_args_list
         )
-        self.assertIn("Aforo máximo: 2", printed_text)
-        self.assertIn("Plazas ocupadas: 1", printed_text)
-        self.assertIn("Plazas libres: 1", printed_text)
-        self.assertIn("Ana | García | Sí | 2026-10-01 | Inscrito", printed_text)
+        self.assertIn("Aforo máximo", printed_text)
+        self.assertIn("Plazas ocupadas", printed_text)
+        self.assertIn("Plazas libres", printed_text)
+        for value in ("2", "1", "Ana", "García", "Sí", "2026-10-01", "Inscrito"):
+            self.assertIn(value, printed_text)
 
     def test_weekday_selector_adds_days_one_by_one_until_zero(self):
         with patch("builtins.input", side_effect=["1", "1", "3", "0"]):
