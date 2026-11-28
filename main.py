@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import date
 from pathlib import Path
 
@@ -30,11 +31,13 @@ from src.util.database import DataBase
 from src.util.unexpectedException import UnexpectedException
 
 
+from src.remesas import generar_remesa
 from src.usuarios.registro_usuarios_vista import (
     iniciar_registro_no_socio,
     iniciar_registro_socio,
 )
 from src.usuarios.registrar_usuarios import migrar_genero
+
 
 def main() -> None:
     database_exists = Path(DATABASE).is_file()
@@ -92,6 +95,7 @@ def run_menu(database: DataBase) -> None:
         print("8. Registrar nuevo usuario (no socio)")
         print("9. Registrar nuevo socio")
         print("10. Registrar asistencia")
+        print("11. Generar remesa mensual")
 
         print("0. Salir")
         option = input("Selecciona una opción: ").strip()
@@ -181,8 +185,20 @@ def run_menu(database: DataBase) -> None:
             except UnexpectedException as error:
                 print(f"Error al acceder a la base de datos: {error}")
             continue
+        if option == "11":
+            month = input("Mes de la remesa (AAAA-MM): ").strip()
+            try:
+                output_path = generar_remesa(database.dbname, month)
+                print(f"Remesa generada correctamente: {output_path}")
+            except ValueError as error:
+                print(f"Datos no válidos: {error}")
+            except (sqlite3.Error, OSError) as error:
+                print(f"Error al generar la remesa: {error}")
+            continue
 
-        print("Opción no válida. Elige 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 o 0.")
+        print(
+            "Opción no válida. Elige 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 o 0."
+        )
 
 
 def display_activities(activities: list[dict[str, object]]) -> None:
